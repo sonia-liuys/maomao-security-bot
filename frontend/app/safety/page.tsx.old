@@ -1,0 +1,197 @@
+"use client"
+
+import { useState, useEffect, useRef } from "react"
+import { Card } from "@/components/ui/card"
+import Navigation from "@/components/navigation"
+import { Shield, Check, AlertTriangle } from "lucide-react"
+import useRobotConnection from "@/hooks/useRobotConnection"
+
+type Emotion = "happy" | "sad" | "neutral" | "excited" | "sleepy" | "suspicious" | "angry"
+
+export default function SafetyMode() {
+  // 狀態變量
+  const [currentEmotion, setCurrentEmotion] = useState<Emotion>("neutral")
+  const [securityLevel, setSecurityLevel] = useState("Normal")
+  const [threatDetected, setThreatDetected] = useState(false)
+  const [statusMessage, setStatusMessage] = useState("Monitoring...")
+  const [recognizedPerson, setRecognizedPerson] = useState<string | null>(null)
+  const [eyeColor, setEyeColor] = useState<string>("green")
+  const [currentEmoji, setCurrentEmoji] = useState<string>("😐")
+  
+  // WebSocket 連接
+  const { isConnected, setRobotMode, lastMessage } = useRobotConnection()
+
+  // 使用ref追蹤是否已經發送過命令
+  const hasSentCommandRef = useRef(false)
+  
+  // 切換到監視模式
+  useEffect(() => {
+    // 當後端連接且尚未發送命令時，自動切換到監視模式
+    if (isConnected && !hasSentCommandRef.current) {
+      console.log('已連接到機器人，切換到監視模式');
+      setRobotMode('surveillance');
+      hasSentCommandRef.current = true;
+    }
+  }, [isConnected, setRobotMode]);
+
+  // 處理從後端接收的消息
+  useEffect(() => {
+    if (!lastMessage) return;
+    
+    console.log('收到新消息:', lastMessage);
+    
+    // 處理識別結果消息
+    if (lastMessage && typeof lastMessage === 'object' && 'type' in lastMessage && lastMessage.type === 'recognition_result') {
+      const data = lastMessage.data as any;
+      console.log('識別結果:', data);
+      console.log('收到眼睛顏色:', data.eye_color);
+      console.log('收到表情符號:', data.emoji);
+      console.log('是否識別出已知人員:', data.recognized);
+      
+      // 更新眼睛顏色
+      if (data.eye_color) {
+        console.log('更新眼睛顏色為:', data.eye_color);
+        setEyeColor(data.eye_color);
+      }
+      
+      // 更新表情符號
+      if (data.emoji) {
+        console.log('更新表情符號為:', data.emoji);
+        setCurrentEmoji(data.emoji);
+      }
+      
+      // 更新其他狀態
+      if (data.recognized) {
+        setCurrentEmotion('happy');
+        setThreatDetected(false);
+        setSecurityLevel('Normal');
+        setRecognizedPerson(data.name);
+        setStatusMessage(`Recognized: ${data.name}`);
+      } else {
+        setCurrentEmotion('suspicious');
+        setThreatDetected(true);
+        setSecurityLevel('Alert');
+        setRecognizedPerson(null);
+        setStatusMessage(data.message || 'Unknown Person Detected!');
+      }
+    }
+  }, [lastMessage]);
+
+  // 監聽 eyeColor 變化
+  useEffect(() => {
+    console.log('眼睛顏色狀態變化為:', eyeColor);
+    
+    // 強制刷新頁面
+    const forceUpdate = setTimeout(() => {
+      console.log('強制刷新頁面以更新光環顏色');
+      // 使用空的 setState 來觸發重新渲染
+      setCurrentEmotion(prev => prev);
+    }, 100);
+    
+    return () => clearTimeout(forceUpdate);
+  }, [eyeColor]);
+  
+  // Emoji mapping for emotional states
+  const emotionEmoji: Record<Emotion, string> = {
+    happy: "😄",
+    sad: "😢",
+    neutral: "😐",
+    excited: "😃",
+    sleepy: "😴",
+    suspicious: "😕",
+    angry: "😡"
+  }
+
+
+
+  return (
+    <div className="flex flex-col min-h-screen bg-gradient-to-b from-gray-900 to-gray-950">
+      <Navigation />
+      
+      <main className="flex-grow p-4 md:p-8">
+        <div className="max-w-5xl mx-auto">
+          <div className="flex items-center mb-8">
+            <Shield className="h-8 w-8 mr-3 text-[#50bedc]" />
+            <h1 className="text-3xl font-bold text-white">Security Mode</h1>
+          </div>
+          
+          <Card className="bg-gray-800/50 border-gray-700 shadow-xl overflow-hidden">
+            <div className="p-6 flex flex-col md:flex-row gap-8">
+              <div className="w-full bg-gray-900/80 rounded-lg p-6 border border-gray-700 flex flex-col">
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-xl font-medium text-[#50bedc]">Connection Status</h3>
+                  <div className="flex items-center">
+                    <div className={`h-3 w-3 rounded-full mr-2 ${isConnected ? "bg-green-500" : "bg-red-500"}`}></div>
+                    <span className="text-gray-300">{isConnected ? "Connected" : "Disconnected"}</span>
+                  </div>
+                </div>
+                <h2 className="text-2xl font-medium text-[#50bedc] mb-6 text-center">
+                  Surveillance Mode {isConnected ? "Active" : "Inactive"}
+                </h2>
+                
+                <div className="flex-grow flex flex-col items-center justify-center py-6">
+                  {/* 表情符號和光環 */}
+                  <div
+                    className={`w-[200px] h-[200px] flex items-center justify-center rounded-full transition-all duration-1000 ${
+                      threatDetected
+                        ? "border-2 border-red-500/50 text-yellow-400"
+                        : "border border-[#50bedc]/40 text-yellow-400"
+                    }`}
+                    style={{
+                      background: "radial-gradient(circle, rgba(10,30,50,0.8) 0%, rgba(5,10,15,0.95) 70%)",
+                      transition: "all 0.5s ease",
+                      boxShadow: `0 0 20px 5px ${
+                eyeColor === "yellow" ? "rgba(255, 255, 0, 0.9)" : 
+                eyeColor === "red" ? "rgba(255, 0, 0, 0.9)" : 
+                eyeColor === "green" ? "rgba(0, 255, 0, 0.9)" : 
+                "rgba(80, 190, 220, 0.9)"
+              }`
+                    }}
+                  >
+                    <div
+                      className="text-[100px] animate-pulse"
+                      style={{
+                        filter: "drop-shadow(0 0 10px rgba(80, 190, 220, 0.8))",
+                        animation: `${threatDetected ? "pulse 0.5s infinite" : "pulse 3s infinite"}`,
+                      }}
+                    >
+                      {currentEmoji || emotionEmoji[currentEmotion]}
+                    </div>
+                    <div className="absolute bottom-0 left-0 right-0 text-xs text-white bg-black/50 text-center py-1">
+                      {eyeColor}
+                    </div>
+                  </div>
+
+                  {/* Status message */}
+                  <div className={`mt-8 text-2xl text-center glow-text ${threatDetected ? "text-red-400" : "text-[#50bedc]"}`}>
+                    {statusMessage}
+                  </div>
+
+                  {/* Recognized person */}
+                  {recognizedPerson && (
+                    <div className="mt-4 text-xl text-center text-green-400">
+                      {recognizedPerson}
+                    </div>
+                  )}
+
+                  {/* Security level indicator */}
+                  <div className="mt-8 flex items-center justify-center gap-2">
+                    <div className="text-lg text-gray-400">Security Level:</div>
+                    <div className={`font-bold ${securityLevel === "Alert" ? "text-red-400" : "text-green-400"}`}>
+                      {securityLevel}
+                    </div>
+                    {securityLevel === "Alert" ? (
+                      <AlertTriangle className="h-5 w-5 text-red-400" />
+                    ) : (
+                      <Check className="h-5 w-5 text-green-400" />
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </main>
+    </div>
+  )
+}

@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 0%;
+  --foreground: 210 40% 98%;
+
+  --card: 224 71% 4%;
+  --card-foreground: 213 31% 91%;
+
+  --popover: 224 71% 4%;
+  --popover-foreground: 215 20% 65%;
+
+  --primary: 210 40% 98%;
+  --primary-foreground: 222.2 47.4% 11.2%;
+
+  --secondary: 222.2 47.4% 11.2%;
+  --secondary-foreground: 210 40% 98%;
+
+  --muted: 223 47% 11%;
+  --muted-foreground: 215.4 16.3% 56.9%;
+
+  --accent: 216 34% 17%;
+  --accent-foreground: 210 40% 98%;
+
+  --destructive: 0 63% 31%;
+  --destructive-foreground: 210 40% 98%;
+
+  --border: 216 34% 17%;
+  --input: 216 34% 17%;
+  --ring: 216 34% 17%;
+
+  --radius: 0.5rem;
+}
+
+body {
+  background-color: black;
+  color: white;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+.futuristic-border {
+  border: 1px solid rgba(80, 190, 220, 0.4);
+  box-shadow: 0 0 10px rgba(80, 190, 220, 0.3);
+}
+
+.futuristic-panel {
+  background: linear-gradient(135deg, rgba(10, 20, 30, 0.9), rgba(5, 10, 15, 0.95));
+  border-radius: 8px;
+  backdrop-filter: blur(10px);
+}
+
+.glow-text {
+  text-shadow: 0 0 15px rgba(80, 190, 220, 0.8), 0 0 10px rgba(80, 190, 220, 0.5);
+}
+
+.control-button {
+  transition: all 0.2s ease;
+  border: 1px solid rgba(80, 190, 220, 0.3);
+}
+
+.control-button:active {
+  transform: scale(0.95);
+}
+
+.grid-bg {
+  background-image: linear-gradient(rgba(80, 190, 220, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(80, 190, 220, 0.1) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.progress-bar {
+  background: linear-gradient(90deg, rgba(80, 190, 220, 0.8), rgba(80, 190, 220, 0.4));
+  height: 8px;
+  border-radius: 4px;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.scan-line {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: rgba(80, 190, 220, 0.6);
+  animation: scan 3s linear infinite;
+  box-shadow: 0 0 8px 1px rgba(80, 190, 220, 0.8);
+}
+
+.rotate-slow {
+  animation: rotate 10s linear infinite;
+}
+
+.rotate-medium {
+  animation: rotate 5s linear infinite;
+}
+
+.rotate-fast {
+  animation: rotate 2s linear infinite;
+}

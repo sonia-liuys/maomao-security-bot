@@ -1,0 +1,451 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+模式管理器 - 控制機器人的不同運行模式
+"""
+
+import logging
+import time
+from enum import Enum, auto
+
+class RobotMode(Enum):
+    """機器人運行模式枚舉"""
+    MANUAL = auto()       # 手動模式
+    PATROL = auto()       # 巡邏模式
+    SURVEILLANCE = auto() # 監視模式
+
+class ModeManager:
+    """機器人模式管理器，處理不同模式的邏輯和轉換"""
+    
+    def __init__(self, vision_system, servo_controller, movement_controller, config):
+        """初始化模式管理器
+        
+        Args:
+            vision_system: 視覺系統實例
+            servo_controller: 伺服馬達控制器實例
+            movement_controller: 移動控制器實例
+            config (dict): 模式配置
+        """
+        self.logger = logging.getLogger("ModeManager")
+        self.vision_system = vision_system
+        self.servo_controller = servo_controller
+        self.movement_controller = movement_controller
+        self.config = config
+        
+        self.current_mode = None
+        self.mode_start_time = 0
+        
+        # 模式特定狀態
+        self.patrol_last_move_time = 0
+        self.surveillance_countdown = 0
+        self.surveillance_intruder_detected = False
+        self.student_id_detection_pause_until = 0
+        self.alarm_active = False  # 添加警報狀態屬性
+        self.websocket_server = None  # 將在RobotController中設置
+        
+        self.logger.info("模式管理器初始化完成")
+        self.logger.info("Mode manager initialization complete")
+    
+    def set_mode(self, mode):
+        """設置機器人模式
+        
+        Args:
+            mode (RobotMode): 要設置的模式
+        """
+        if self.current_mode == mode:
+            return
+            
+        self.logger.info(f"切換模式: {mode.name}")
+        
+        # 退出當前模式
+        if self.current_mode:
+            self._exit_mode(self.current_mode)
+        
+        # 進入新模式
+        self.current_mode = mode
+        self.mode_start_time = time.time()
+        self._enter_mode(mode)
+    
+    def _enter_mode(self, mode):
+        """進入指定模式時的處理
+        
+        Args:
+            mode (RobotMode): 要進入的模式
+        """
+        # 重置模式特定狀態
+        self.patrol_last_move_time = 0
+        self.surveillance_countdown = 0
+        self.surveillance_intruder_detected = False
+        
+        # 根據模式設置眼睛顏色
+        if mode == RobotMode.MANUAL:
+            self.servo_controller.set_eye_color("green")
+        elif mode == RobotMode.PATROL:
+            self.servo_controller.set_eye_color("yellow")  # 巡邏模式使用黃色眼睛
+        elif mode == RobotMode.SURVEILLANCE:
+            self.servo_controller.set_eye_color("green")
+        
+        # 模式特定初始化
+        if mode == RobotMode.MANUAL:
+            # 手動模式下啟動自然眨眼和手臂擺動
+            self.servo_controller.start_natural_blinking()
+            self.servo_controller.start_arm_swinging()
+            
+        elif mode == RobotMode.PATROL:
+            # 巡邏模式下啟動自動巡邏
+            self.patrol_last_move_time = time.time()
+            
+        elif mode == RobotMode.SURVEILLANCE:
+            # 監視模式下準備監控
+            pass
+    
+    def _exit_mode(self, mode):
+        """退出指定模式時的處理
+        
+        Args:
+            mode (RobotMode): 要退出的模式
+        """
+        # 停止所有運動
+        self.movement_controller.stop()
+        
+        # 模式特定清理
+        if mode == RobotMode.MANUAL:
+            self.servo_controller.stop_natural_blinking()
+            self.servo_controller.stop_arm_swinging()
+    
+    def update(self, vision_data):
+        """更新當前模式的狀態
+        
+        Args:
+            vision_data (dict): 視覺系統提供的最新數據
+        """
+        if not self.current_mode:
+            return
+            
+        # 根據當前模式執行相應的更新邏輯
+        if self.current_mode == RobotMode.MANUAL:
+            self._update_manual_mode(vision_data)
+        elif self.current_mode == RobotMode.PATROL:
+            self._update_patrol_mode(vision_data)
+        elif self.current_mode == RobotMode.SURVEILLANCE:
+            self._update_surveillance_mode(vision_data)
+    
+    def _update_manual_mode(self, vision_data):
+        """更新手動模式
+        
+        Args:
+            vision_data (dict): 視覺系統提供的最新數據
+        """
+        # 手動模式主要由外部控制，這裡只處理眼睛跟隨
+        if vision_data.get("face_detected"):
+            face_x = vision_data.get("face_x", 0.5)
+            face_y = vision_data.get("face_y", 0.5)
+            self.servo_controller.follow_face(face_x, face_y)
+    
+    def _update_patrol_mode(self, vision_data):
+        """更新巡邏模式
+        
+        Args:
+            vision_data (dict): 視覺系統提供的最新數據
+        """
+        current_time = time.time()
+        
+        # 檢測到人臉時的處理
+        if vision_data.get("face_detected"):
+            face_x = vision_data.get("face_x", 0.5)
+            face_y = vision_data.get("face_y", 0.5)
+            
+            # 讓眼睛跟隨人臉
+            self.servo_controller.follow_face(face_x, face_y)
+            
+            # 如果是未識別的人，停止並顯示警告
+            if not vision_data.get("recognized_person"):
+                self.movement_controller.stop()
+                self.servo_controller.set_eye_color("red")
+                # 通知前端顯示警告
+                return
+        else:
+            # 沒有檢測到人臉時，恢復眼睛顏色
+            self.servo_controller.set_eye_color("green")
+        
+        # 自動巡邏邏輯 - 每30秒沿方形路徑移動
+        if current_time - self.patrol_last_move_time > 30:
+            self.patrol_last_move_time = current_time
+            self.movement_controller.move_square_path()
+    
+    def _update_surveillance_mode(self, vision_data):
+        """更新監視模式
+        
+        Args:
+            vision_data (dict): 視覺系統提供的最新數據
+        """
+        current_time = time.time()
+        
+        
+        # 檢查學生證檢測暫停時間
+        if current_time < self.student_id_detection_pause_until:
+            return
+            
+        # 檢測到學生證
+        if vision_data.get("student_id_detected"):
+            # 重置到初始狀態
+            self.servo_controller.set_eye_color("green")
+            self.servo_controller.lower_arms()
+            self.surveillance_intruder_detected = False
+            self.surveillance_countdown = 0
+            
+            # 暫停人臉檢測60秒
+            self.student_id_detection_pause_until = current_time + 60
+            return
+        
+        # 檢測到人臉時的處理
+        if vision_data.get("face_detected"):
+            face_x = vision_data.get("face_x", 0.5)
+            face_y = vision_data.get("face_y", 0.5)
+            
+            # 讓眼睛跟隨人臉
+            self.servo_controller.follow_face(face_x, face_y)
+            
+            # 識別出的人
+            if vision_data.get("recognized_person"):
+                recognized_person = vision_data.get("recognized_person")
+                self.servo_controller.set_eye_color("green")
+                self.surveillance_intruder_detected = False
+                self.surveillance_countdown = 0
+                
+                # 顯示識別出的人名
+                self.logger.info(f"識別出: {recognized_person}")
+                self.logger.info(f"Recognized: {recognized_person}")
+                
+                # 通知前端顯示歡迎信息和識別出的人名
+                message = {
+                    "type": "recognition_result",
+                    "data": {
+                        "recognized": True,
+                        "name": recognized_person,
+                        "confidence": vision_data.get("confidence", 0.0),
+                        "emoji": "😄",  # 開心的emoji (😄 = 笑臉)
+                        "eye_color": "green"  # 添加眼睛顏色信息，供前端顯示光環
+                    }
+                }
+                # 如果有WebSocket服務器實例，廣播識別結果
+                if hasattr(self, "websocket_server") and self.websocket_server:
+                    self.websocket_server.broadcast_status(message)
+            
+            # 未識別的人
+            else:
+                # 根據不同的狀態處理未識別的人
+                if not self.surveillance_intruder_detected:
+                    # 第一次檢測到未識別的人
+                    self.logger.info("第一次檢測到未識別的人，設置黃色眼睛")
+                    self.surveillance_intruder_detected = True
+                    self.surveillance_countdown = 5  # 5秒倒計時
+                    
+                    # 設置眼睛顏色為黃色
+                    eye_color = "yellow"
+                    self.servo_controller.set_eye_color(eye_color)
+                    self.logger.info(f"眼睛顏色已設置為{eye_color}")
+                    self.servo_controller.raise_right_arm()
+                    
+                    # 記錄未識別的人
+                    self.logger.info("檢測到未識別的人臉")
+                    
+                    # 通知前端開始倒計時和未識別的人臉
+                    message = {
+                        "type": "recognition_result",
+                        "data": {
+                            "recognized": False,
+                            "message": "不認識的人",  # 在前端顯示「不認識的人」
+                            "countdown": self.surveillance_countdown,
+                            "confidence": vision_data.get("confidence", 0.0),
+                            "emoji": "😕",  # 懷疑臉的emoji (😕 = 困惑臉)
+                            "eye_color": eye_color  # 使用上面定義的眼睛顏色變量
+                        }
+                    }
+                    self.logger.info(f"發送未識別人員消息到前端: {message}")
+                    
+                    # 如果有WebSocket服務器實例，廣播識別結果
+                    if hasattr(self, "websocket_server") and self.websocket_server:
+                        self.logger.info(f"廣播未識別人員消息到前端: {message}")
+                        self.logger.info(f"Broadcasting message to frontend: {message}")
+                        self.websocket_server.broadcast_status(message)
+                        self.logger.info("已廣播未識別人員消息到前端")
+                
+                elif self.surveillance_countdown > 0:
+                    # 倒計時進行中
+                    # 由於現在更新頻率是1Hz，每次減少1秒
+                    self.surveillance_countdown -= 1.0
+                    
+                    # 倒計時結束，入侵者仍在
+                    if self.surveillance_countdown <= 0:
+                        # 設置眼睛顏色為紅色
+                        eye_color = "red"
+                        self.servo_controller.set_eye_color(eye_color)
+                        self.logger.info(f"眼睛顏色已設置為{eye_color}")
+                        self.servo_controller.raise_arms()
+                        self.servo_controller.activate_laser()
+                        # 通知前端顯示警報信息
+                        message = {
+                            "type": "recognition_result",
+                            "data": {
+                                "recognized": False,
+                                "message": "警告！不認識的人！",  # 在前端顯示警告訊息
+                                "countdown": 0,
+                                "confidence": vision_data.get("confidence", 0.0),
+                                "emoji": "😡",  # 生氣的emoji (😡 = 生氣臉)
+                                "eye_color": eye_color  # 使用上面定義的眼睛顏色變量
+                            }
+                        }
+                        # 如果有WebSocket服務器實例，廣播識別結果
+                        if hasattr(self, "websocket_server") and self.websocket_server:
+                            self.logger.info(f"廣播警告消息到前端: {message}")
+                            self.logger.info(f"Broadcasting warning message to frontend: {message}")
+                            self.websocket_server.broadcast_status(message)
+                            self.logger.info("已廣播警告消息到前端")
+                            
+                        # 設置警報狀態為活躍
+                        self.alarm_active = True
+                        self.logger.info("警報狀態已活躍")
+                        self.logger.info("Alarm state activated")
+        else:
+            # 沒有檢測到人臉
+            # 如果沒有入侵者且眼睛顏色不是綠色，且警報狀態未活躍，則設置為綠色
+            if not self.surveillance_intruder_detected and self.servo_controller.eye_color != "green" and not self.alarm_active:
+                self.servo_controller.set_eye_color("green")
+                
+                # 廣播安全消息到前端
+                message = {
+                    "type": "recognition_result",
+                    "data": {
+                        "recognized": False,
+                        "message": "沒有人在畫面中",
+                        "countdown": 0,
+                        "confidence": 0.0,
+                        "emoji": "😊",
+                        "eye_color": "green"
+                    }
+                }
+                
+                # 如果有WebSocket服務器實例，廣播識別結果
+                if hasattr(self, "websocket_server") and self.websocket_server:
+                    self.logger.info(f"廣播安全消息到前端: {message}")
+                    self.logger.info(f"Broadcasting safety message to frontend: {message}")
+                    self.websocket_server.broadcast_status(message)
+                    self.logger.info("已廣播安全消息到前端")
+            
+            # 之前有入侵者
+            if self.surveillance_intruder_detected:
+                # 入侵者離開了，但如果警報狀態仍然活躍，則保持紅色狀態
+                if not self.alarm_active:
+                    self.servo_controller.set_eye_color("green")
+                    self.servo_controller.lower_arms()
+                    self.servo_controller.deactivate_laser()
+                    self.surveillance_intruder_detected = False
+                    self.surveillance_countdown = 0
+                    
+                    # 廣播安全消息到前端
+                    message = {
+                        "type": "recognition_result",
+                        "data": {
+                            "recognized": False,
+                            "message": "沒有人在畫面中",
+                            "countdown": 0,
+                            "confidence": 0.0,
+                            "emoji": "😊",
+                            "eye_color": "green"
+                        }
+                    }
+                    
+                    # 如果有WebSocket服務器實例，廣播識別結果
+                    if hasattr(self, "websocket_server") and self.websocket_server:
+                        self.logger.info(f"廣播安全消息到前端: {message}")
+                        self.logger.info(f"Broadcasting safety message to frontend: {message}")
+                        self.websocket_server.broadcast_status(message)
+                        self.logger.info("已廣播安全消息到前端")
+                else:
+                    # 警報狀態仍然活躍，保持紅色狀態
+                    self.logger.info("警報狀態仍然活躍，保持紅色狀態")
+                    self.logger.info("Alarm is still active, maintaining red state")
+                    self.surveillance_intruder_detected = True  # 保持入侵者標誌
+                
+                # 廣播安全消息到前端
+                message = {
+                    "type": "recognition_result",
+                    "data": {
+                        "recognized": False,
+                        "message": "沒有人在畫面中",
+                        "countdown": 0,
+                        "confidence": 0.0,
+                        "emoji": "😊",
+                        "eye_color": "green"
+                    }
+                }
+                
+                # 如果有WebSocket服務器實例，廣播識別結果
+                if hasattr(self, "websocket_server") and self.websocket_server:
+                    self.logger.info(f"廣播安全消息到前端: {message}")
+                    self.logger.info(f"Broadcasting safety message to frontend: {message}")
+                    self.websocket_server.broadcast_status(message)
+                    self.logger.info("已廣播安全消息到前端")
+    
+    def clear_alarm(self):
+        """解除警報狀態
+        
+        將警報狀態設置為非活躍，並將眼睛顏色設置為綠色
+        """
+        self.logger.info("解除警報狀態")
+        self.logger.info("Clearing alarm state")
+        
+        # 設置警報狀態為非活躍
+        self.alarm_active = False
+        self.surveillance_intruder_detected = False
+        self.surveillance_countdown = 0
+        
+        # 設置眼睛顏色為綠色
+        self.servo_controller.set_eye_color("green")
+        self.servo_controller.lower_arms()
+        self.servo_controller.deactivate_laser()
+        
+        # 廣播安全消息到前端
+        message = {
+            "type": "recognition_result",
+            "data": {
+                "recognized": False,
+                "message": "警報已解除",
+                "countdown": 0,
+                "confidence": 0.0,
+                "emoji": "😊",
+                "eye_color": "green"
+            }
+        }
+        
+        # 如果有WebSocket服務器實例，廣播識別結果
+        if hasattr(self, "websocket_server") and self.websocket_server:
+            self.logger.info(f"廣播解除警報消息到前端: {message}")
+            self.logger.info(f"Broadcasting alarm clear message to frontend: {message}")
+            self.websocket_server.broadcast_status(message)
+            self.logger.info("已廣播解除警報消息到前端")
+    
+    def get_status(self):
+        """獲取模式管理器當前狀態
+        
+        Returns:
+            dict: 模式狀態數據
+        """
+        status = {
+            "current_mode": self.current_mode.name if self.current_mode else "NONE",
+            "mode_duration": time.time() - self.mode_start_time if self.current_mode else 0,
+            "surveillance_intruder_detected": self.surveillance_intruder_detected,
+            "surveillance_countdown": self.surveillance_countdown,
+            "alarm_active": self.alarm_active
+        }
+        
+        # 添加模式特定狀態
+        if self.current_mode == RobotMode.SURVEILLANCE:
+            status.update({
+                "intruder_detected": self.surveillance_intruder_detected,
+                "countdown": self.surveillance_countdown if self.surveillance_countdown > 0 else 0
+            })
+        
+        return status

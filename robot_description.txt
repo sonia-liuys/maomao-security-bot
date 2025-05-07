@@ -1,0 +1,74 @@
+
+### THIS FILE IS FOR AI TO READ ###
+
+This robot integrates AI vision recognition, sensors, and multiple servo motors, featuring three main modes: **Manual Mode, Patrol Mode, and Surveillance Mode**. It is suitable for security patrols and interactive demonstrations. Below are the details for each mode, hardware architecture, and AI design:
+
+---
+
+### 1. Manual Mode
+- The user can control the robot via the chest tablet or remotely, allowing it to perform eight movement actions (move forward, move backward, continuously move forward, continuously move backward, stop, turn left 90°, turn right 90°, and move in a square path).
+- The robot’s eyes display green, and it will naturally blink and swing its arms, creating lively interactions.
+
+### 2. Patrol Mode
+- The robot automatically patrols along a square path every 30 seconds, with its eyes showing green.
+- When a face is detected during patrol, the robot first determines whether the person is recognized:
+  - If the person is **not recognized**, the robot will stop, its eyes turn red, and the chest tablet displays “Please leave.”
+- When a face is detected, the robot’s eyes will follow the person’s movement.
+- With ultrasonic sensors, the robot will stop automatically when it encounters obstacles.
+
+### 3. Surveillance Mode
+- The robot can be remotely controlled via the tablet and can switch to other modes at any time.
+- If an intruder is detected, pressing the recovery button on the tablet will restore the robot to its normal state.
+- When a face is detected, the robot first determines whether the person is recognized:
+  - If recognized, the tablet displays “Hello! Welcome home.”
+  - If not recognized, the robot’s eyes turn yellow, it raises its right arm, and a 5-second countdown starts (displayed on the tablet).
+    - If the person leaves within 5 seconds, the eyes return to green and the right arm lowers.
+    - If the person is still present after 5 seconds, the eyes turn red, both arms are raised, the right hand’s laser is activated, and the stranger’s face is displayed on the tablet with the message “The police have been notified.”
+- When a student ID is detected, the robot returns to its initial state, pauses face detection for 60 seconds, and then resumes surveillance.
+
+---
+
+### 4. Hardware Architecture
+- **Chest Tablet**  
+  Provides the user interface, real-time image display, and alert messages. It also features a recovery button and student ID detection.
+- **Raspberry Pi 5**  
+  - Connects to the camera for AI vision recognition.
+  - Controls 9 servo motors:
+    | Servo Number | Controlled Part      |
+    |--------------|---------------------|
+    | 1            | Eye horizontal movement |
+    | 2            | Eye vertical movement   |
+    | 3-6          | Eyelid (upper/lower, left/right) movement |
+    | 7            | Neck rotation         |
+    | 8-9          | Left and right arm movement |
+- **Arduino**  
+  - Communicates with Raspberry Pi via serial port.
+  - Drives Mecanum wheels (for eight movement modes).
+  - Controls the laser pointer and ultrasonic sensor.
+
+---
+
+### 5. AI Recognition System
+- **Technology**: Uses Google Teachable Machine to train models, deployed on Raspberry Pi 5.
+- **Recognition Categories**:
+  1. Sonia (specific face)
+  2. Matthew (specific face)
+  3. Sonia’s ID badges (student ID)
+  4. Matthew’s ID badges (student ID)
+- **Processing Logic**:
+  - If recognition confidence is below the threshold, it is treated as an unrecognized person.
+  - The robot’s eyes (servo 1 and 2) follow the detected face in real-time.
+
+---
+
+### Servo Motor Assignments
+
+- **Servo 1**: Eye horizontal movement (left/right)
+- **Servo 2**: Eye vertical movement (up/down)
+- **Servo 3**: Left lower eyelid movement
+- **Servo 4**: Right lower eyelid movement
+- **Servo 5**: Left upper eyelid movement
+- **Servo 6**: Right upper eyelid movement
+- **Servo 7**: Neck movement (rotation or tilt)
+- **Servo 8**: Right arm movement (raise, lower, swing)
+- **Servo 9**: Left arm movement (raise, lower, swing)

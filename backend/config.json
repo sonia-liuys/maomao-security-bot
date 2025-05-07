@@ -1,0 +1,36 @@
+{
+    "robot": {
+        "name": "毛毛安全機器人",
+        "version": "1.0.0"
+    },
+    "vision": {
+        "camera_index": 0,
+        "frame_width": 640,
+        "frame_height": 480,
+        "model_path": "models/teachable_machine_model.tflite",
+        "confidence_threshold": 0.7
+    },
+    "servo": {
+        "blink_interval_min": 2.0,
+        "blink_interval_max": 6.0,
+        "eye_blink_interval": [2.0, 5.0],
+        "arm_swing_interval": [3.0, 8.0]
+    },
+    "movement": {
+        "serial_port": "/dev/ttyUSB0",
+        "baud_rate": 115200
+    },
+    "communication": {
+        "websocket_port": 8765
+    },
+    "modes": {
+        "patrol_interval": 30,
+        "surveillance_countdown": 5
+    },
+    "safety": {
+        "check_interval": 1.0,
+        "max_cpu_temp": 80.0,
+        "max_cpu_usage": 90.0,
+        "max_memory_usage": 90.0
+    }
+}

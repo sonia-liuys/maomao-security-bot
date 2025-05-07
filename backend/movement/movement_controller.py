@@ -1,0 +1,296 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Movement Controller - Manages the robot's movement functions
+移動控制器 - 管理機器人的移動功能
+"""
+
+import logging
+import threading
+import time
+import serial
+import json
+
+class MovementController:
+    """Movement Controller class, manages the robot's movement functions
+    移動控制器類，管理機器人的移動功能"""
+    
+    # Movement direction constants
+    # 移動方向常量
+    DIRECTION_FORWARD = "forward"
+    DIRECTION_BACKWARD = "backward"
+    DIRECTION_LEFT = "left"
+    DIRECTION_RIGHT = "right"
+    DIRECTION_STOP = "stop"
+    DIRECTION_CONTINUOUS_FORWARD = "continuous_forward"
+    DIRECTION_CONTINUOUS_BACKWARD = "continuous_backward"
+    DIRECTION_SQUARE_PATH = "square_path"
+    
+    def __init__(self, config):
+        """Initialize movement controller
+        
+        Args:
+            config (dict): Movement controller configuration
+            
+        初始化移動控制器
+        
+        Args:
+            config (dict): 移動控制器配置
+        """
+        self.logger = logging.getLogger("Movement")
+        self.config = config
+        
+        # Serial port configuration
+        # 串口配置
+        self.serial_port = config.get("serial_port", "/dev/ttyUSB0")
+        self.baud_rate = config.get("baud_rate", 115200)
+        
+        # Initialize status variables
+        # 初始化狀態變數
+        self.running = False
+        self.serial_conn = None
+        self.current_direction = self.DIRECTION_STOP
+        self.obstacle_detected = False
+        self.square_path_active = False
+        self.square_path_step = 0
+        
+        # Processing thread
+        # 處理線程
+        self.thread = None
+        self.lock = threading.Lock()
+        
+        # 初始化硬體連接
+        self._init_hardware()
+        
+        self.logger.info("移動控制器初始化完成")
+    
+    def _init_hardware(self):
+        """初始化硬體連接
+        
+        注意：這是一個模擬實現，實際部署時需要使用真實的硬體控制代碼
+        """
+        self.logger.info("初始化移動控制器硬體連接...")
+        
+        try:
+            # 實際部署時，這裡會打開與Arduino的串口連接
+            # self.serial_conn = serial.Serial(self.serial_port, self.baud_rate, timeout=1.0)
+            # 模擬初始化
+            time.sleep(0.5)
+            self.logger.info("移動控制器硬體連接已就緒")
+        except Exception as e:
+            self.logger.error(f"無法初始化移動控制器硬體: {e}")
+    
+    def start(self):
+        """啟動移動控制器"""
+        if self.running:
+            return
+            
+        self.logger.info("啟動移動控制器...")
+        self.running = True
+        
+        # 停止所有移動
+        self.stop()
+        
+        # 啟動處理線程
+        self.thread = threading.Thread(target=self._update_loop)
+        self.thread.daemon = True
+        self.thread.start()
+        
+        self.logger.info("移動控制器已啟動")
+    
+    def stop(self):
+        """停止所有移動"""
+        self.logger.info("停止所有移動")
+        
+        with self.lock:
+            self.current_direction = self.DIRECTION_STOP
+            self.square_path_active = False
+            
+        # 發送停止命令
+        self._send_command("stop")
+    
+    def _stop_thread(self):
+        """停止移動控制器線程"""
+        if not self.running:
+            return
+            
+        self.logger.info("停止移動控制器...")
+        self.running = False
+        
+        # 停止所有移動
+        self.stop()
+        
+        if self.thread:
+            self.thread.join(timeout=1.0)
+        
+        # 關閉串口連接
+        if self.serial_conn and self.serial_conn.is_open:
+            self.serial_conn.close()
+            self.serial_conn = None
+            
+        self.logger.info("移動控制器已停止")
+    
+    def _update_loop(self):
+        """移動控制器更新循環"""
+        last_ultrasonic_check = 0
+        
+        while self.running:
+            current_time = time.time()
+            
+            # 檢查超聲波感測器 (每100ms)
+            if current_time - last_ultrasonic_check > 0.1:
+                self._check_obstacles()
+                last_ultrasonic_check = current_time
+            
+            # 處理方形路徑移動
+            if self.square_path_active:
+                self._update_square_path()
+            
+            # 控制更新頻率
+            time.sleep(0.05)  # 20Hz
+    
+    def _check_obstacles(self):
+        """檢查障礙物
+        
+        注意：這是一個模擬實現，實際部署時需要讀取真實的超聲波感測器數據
+        """
+        # 模擬檢測障礙物 (5%的概率)
+        # 實際部署時，這裡會讀取超聲波感測器數據
+        
+        # 隨機模擬障礙物檢測
+        # import random
+        # obstacle_detected = random.random() < 0.05
+        obstacle_detected = False
+        
+        # 如果檢測到障礙物且正在移動，則停止
+        if obstacle_detected and self.current_direction != self.DIRECTION_STOP:
+            self.logger.warning("檢測到障礙物，停止移動")
+            self.stop()
+            
+        with self.lock:
+            self.obstacle_detected = obstacle_detected
+    
+    def move(self, direction):
+        """控制機器人移動
+        
+        Args:
+            direction (str): 移動方向
+            
+        Returns:
+            bool: 操作是否成功
+        """
+        valid_directions = [
+            self.DIRECTION_FORWARD,
+            self.DIRECTION_BACKWARD,
+            self.DIRECTION_LEFT,
+            self.DIRECTION_RIGHT,
+            self.DIRECTION_STOP,
+            self.DIRECTION_CONTINUOUS_FORWARD,
+            self.DIRECTION_CONTINUOUS_BACKWARD,
+            self.DIRECTION_SQUARE_PATH
+        ]
+        
+        if direction not in valid_directions:
+            self.logger.error(f"無效的移動方向: {direction}")
+            return False
+            
+        self.logger.debug(f"移動方向: {direction}")
+        
+        with self.lock:
+            self.current_direction = direction
+            
+            # 如果是方形路徑，啟動方形路徑移動
+            if direction == self.DIRECTION_SQUARE_PATH:
+                self.square_path_active = True
+                self.square_path_step = 0
+            else:
+                self.square_path_active = False
+        
+        # 發送移動命令
+        if direction != self.DIRECTION_SQUARE_PATH:
+            self._send_command(direction)
+            
+        return True
+    
+    def _send_command(self, command, params=None):
+        """發送命令到Arduino
+        
+        Args:
+            command (str): 命令名稱
+            params (dict, optional): 命令參數
+        """
+        if not params:
+            params = {}
+            
+        # 構建命令數據
+        cmd_data = {
+            "command": command,
+            "params": params
+        }
+        
+        # 序列化為JSON
+        cmd_json = json.dumps(cmd_data)
+        
+        self.logger.debug(f"發送命令: {cmd_json}")
+        
+        # 實際發送命令
+        if self.serial_conn and self.serial_conn.is_open:
+            try:
+                # 發送命令到Arduino
+                # self.serial_conn.write((cmd_json + '\n').encode())
+                pass  # 模擬發送
+            except Exception as e:
+                self.logger.error(f"發送命令失敗: {e}")
+    
+    def _update_square_path(self):
+        """更新方形路徑移動"""
+        if not self.square_path_active:
+            return
+            
+        # 方形路徑的四個步驟：前進、右轉、前進、右轉、前進、右轉、前進、右轉
+        steps = [
+            (self.DIRECTION_FORWARD, 1.0),    # 前進1秒
+            (self.DIRECTION_RIGHT, 0.5),      # 右轉0.5秒 (90度)
+            (self.DIRECTION_FORWARD, 1.0),    # 前進1秒
+            (self.DIRECTION_RIGHT, 0.5),      # 右轉0.5秒 (90度)
+            (self.DIRECTION_FORWARD, 1.0),    # 前進1秒
+            (self.DIRECTION_RIGHT, 0.5),      # 右轉0.5秒 (90度)
+            (self.DIRECTION_FORWARD, 1.0),    # 前進1秒
+            (self.DIRECTION_RIGHT, 0.5),      # 右轉0.5秒 (90度)
+        ]
+        
+        # 獲取當前步驟
+        current_step = self.square_path_step % len(steps)
+        direction, duration = steps[current_step]
+        
+        # 執行當前步驟
+        self._send_command(direction)
+        time.sleep(duration)
+        self._send_command(self.DIRECTION_STOP)
+        
+        # 更新步驟
+        self.square_path_step += 1
+        
+        # 完成一個完整的方形路徑後停止
+        if self.square_path_step >= len(steps):
+            with self.lock:
+                self.square_path_active = False
+                self.current_direction = self.DIRECTION_STOP
+    
+    def move_square_path(self):
+        """執行方形路徑移動"""
+        self.move(self.DIRECTION_SQUARE_PATH)
+    
+    def get_status(self):
+        """獲取移動控制器狀態
+        
+        Returns:
+            dict: 移動控制器狀態
+        """
+        with self.lock:
+            return {
+                "current_direction": self.current_direction,
+                "obstacle_detected": self.obstacle_detected,
+                "square_path_active": self.square_path_active
+            }

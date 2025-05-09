@@ -37,12 +37,15 @@ class ServoController:
     
     # 伺服馬達ID常量 (基於參考程式)
     SERVO_EYE = 1             # 眼睛伺服
-    SERVO_NECK = 2            # 頸部伺服（水平移動）
-    SERVO_RIGHT_ARM_UPPER = 3 # 右手臂上部
-    SERVO_RIGHT_ARM_LOWER = 4 # 右手臂下部
-    SERVO_LEFT_ARM_UPPER = 5  # 左手臂上部
-    SERVO_LEFT_ARM_LOWER = 6  # 左手臂下部
+    SERVO_NECK = 7            # 頸部伺服（水平移動）
+    SERVO_LEFT_LID_LOWER  = 3  # 左眼皮下部
+    SERVO_RIGHT_LID_LOWER = 4 # 右眼皮下部
+    SERVO_LEFT_LID_UPPER  = 5  # 左眼皮上部
+    SERVO_RIGHT_LID_UPPER = 6 # 右眼皮上部
     
+    SERVO_RIGHT_ARM = 8
+    SERVO_LEFT_ARM = 9
+
     # 眼睛顏色映射
     EYE_COLORS = {
         "green": (0, 255, 0),
@@ -57,10 +60,36 @@ class ServoController:
         """初始化伺服馬達控制器
         
         Args:
-            config (dict): 伺服馬達配置
+            config (dict): 設定字典
         """
-        self.logger = logging.getLogger("Servo")
-        self.config = config
+        # 設置日誌
+        self.logger = logging.getLogger("ServoController")
+        
+        # 初始化變數
+        self.lock = threading.RLock()
+        self.running = False
+        self.update_thread = None
+        self.servo_positions = {}
+        self.eye_color = "green"  # 預設眼睛顏色
+        self.natural_blinking = False
+        self.led_blinking = False
+        self.eyelid_blinking = False
+        
+        # 讀取設定
+        self.update_interval = config.get("update_interval", 0.05)  # 更新間隔（秒）
+        self.blink_interval_min = config.get("blink_interval_min", 2.0)  # 最小眨眼間隔（秒）
+        self.blink_interval_max = config.get("blink_interval_max", 6.0)  # 最大眨眼間隔（秒）
+        self.led_blink_interval_min = config.get("led_blink_interval_min", 1.0)  # LED最小眨眼間隔（秒）
+        self.led_blink_interval_max = config.get("led_blink_interval_max", 3.0)  # LED最大眨眼間隔（秒）
+        self.eyelid_blink_interval_min = config.get("eyelid_blink_interval_min", 4.0)  # 眼皮最小眨眼間隔（秒）
+        self.eyelid_blink_interval_max = config.get("eyelid_blink_interval_max", 8.0)  # 眼皮最大眨眼間隔（秒）
+        
+        self.next_led_blink_time = time.time() + random.uniform(self.led_blink_interval_min, self.led_blink_interval_max)
+        self.next_eyelid_blink_time = time.time() + random.uniform(self.eyelid_blink_interval_min, self.eyelid_blink_interval_max)
+        
+        # 處理線程
+        self.thread = None
+        self.lock = threading.Lock()
         
         # 初始化狀態變數
         self.running = False
@@ -107,10 +136,10 @@ class ServoController:
                 # 設置初始位置
                 self.kit.servo[self.SERVO_EYE].angle = 90
                 self.kit.servo[self.SERVO_NECK].angle = 90
-                self.kit.servo[self.SERVO_RIGHT_ARM_UPPER].angle = 160
-                self.kit.servo[self.SERVO_RIGHT_ARM_LOWER].angle = 20
-                self.kit.servo[self.SERVO_LEFT_ARM_UPPER].angle = 20
-                self.kit.servo[self.SERVO_LEFT_ARM_LOWER].angle = 160
+                self.kit.servo[self.SERVO_LEFT_LID_LOWER].angle = 160
+                self.kit.servo[self.SERVO_RIGHT_LID_LOWER].angle = 20
+                self.kit.servo[self.SERVO_LEFT_LID_UPPER].angle = 20
+                self.kit.servo[self.SERVO_RIGHT_LID_UPPER].angle = 160
                 
                 # 初始化NeoPixel LED
                 self.logger.info("初始化NeoPixel LED...")
@@ -324,10 +353,9 @@ class ServoController:
         self.set_position(self.SERVO_NECK, 90)
         
         # 手臂初始位置
-        self.set_position(self.SERVO_RIGHT_ARM_UPPER, 160)
-        self.set_position(self.SERVO_RIGHT_ARM_LOWER, 20)
-        self.set_position(self.SERVO_LEFT_ARM_UPPER, 20)
-        self.set_position(self.SERVO_LEFT_ARM_LOWER, 160)
+        self.set_position(self.SERVO_RIGHT_ARM, 90)
+        self.set_position(self.SERVO_LEFT_ARM, 90)
+        
         
         # 設置眼睛顏色為綠色
         self.set_eye_color("green")
@@ -392,12 +420,94 @@ class ServoController:
             self.move_servo_smooth(self.SERVO_LEFT_ARM_LOWER, new_lower, step_size=2, delay=0.02)
     
     def start_natural_blinking(self):
-        """開始自然眨眼"""
+        """開始自然眨眼（兼容舊版本）"""
         self.natural_blinking = True
+        self.start_led_blinking()
+        self.start_eyelid_blinking()
+    
+    def start_led_blinking(self):
+        """開始 LED 眨眼"""
+        self.logger.info("開始 LED 眨眼")
+        self.led_blinking = True
+        # 重設下次 LED 眨眼時間
+        self.next_led_blink_time = time.time() + random.uniform(self.led_blink_interval_min, self.led_blink_interval_max)
+    
+    def start_eyelid_blinking(self):
+        """開始眼皮眨眼"""
+        self.logger.info("開始眼皮眨眼")
+        self.eyelid_blinking = True
+        # 重設下次眼皮眨眼時間
+        self.next_eyelid_blink_time = time.time() + random.uniform(self.eyelid_blink_interval_min, self.eyelid_blink_interval_max)
+    
+    def close_eyelids(self):
+        """閉上眼皮"""
+        self.logger.info("閉上眼皮")
+        if IS_RASPBERRY_PI and HARDWARE_AVAILABLE and self.kit:
+            try:
+                self.kit.servo[self.SERVO_LEFT_LID_LOWER].angle = 0
+                self.kit.servo[self.SERVO_RIGHT_LID_LOWER].angle = 180
+                self.kit.servo[self.SERVO_LEFT_LID_UPPER].angle = 180
+                self.kit.servo[self.SERVO_RIGHT_LID_UPPER].angle = 0
+                
+                # 更新伺服馬達位置記錄
+                self.servo_positions[self.SERVO_LEFT_LID_LOWER] = 0
+                self.servo_positions[self.SERVO_RIGHT_LID_LOWER] = 180
+                self.servo_positions[self.SERVO_LEFT_LID_UPPER] = 180
+                self.servo_positions[self.SERVO_RIGHT_LID_UPPER] = 0
+                return True
+            except Exception as e:
+                self.logger.error(f"閉上眼皮時發生錯誤: {e}")
+                return False
+        else:
+            # 模擬模式
+            self.servo_positions[self.SERVO_LEFT_LID_LOWER] = 0
+            self.servo_positions[self.SERVO_RIGHT_LID_LOWER] = 180
+            self.servo_positions[self.SERVO_LEFT_LID_UPPER] = 180
+            self.servo_positions[self.SERVO_RIGHT_LID_UPPER] = 0
+            return True
+    
+    def open_eyelids(self):
+        """打開眼皮"""
+        self.logger.info("打開眼皮")
+        if IS_RASPBERRY_PI and HARDWARE_AVAILABLE and self.kit:
+            try:
+                self.kit.servo[self.SERVO_LEFT_LID_LOWER].angle = 160
+                self.kit.servo[self.SERVO_RIGHT_LID_LOWER].angle = 20
+                self.kit.servo[self.SERVO_LEFT_LID_UPPER].angle = 20
+                self.kit.servo[self.SERVO_RIGHT_LID_UPPER].angle = 160
+                
+                # 更新伺服馬達位置記錄
+                self.servo_positions[self.SERVO_LEFT_LID_LOWER] = 160
+                self.servo_positions[self.SERVO_RIGHT_LID_LOWER] = 20
+                self.servo_positions[self.SERVO_LEFT_LID_UPPER] = 20
+                self.servo_positions[self.SERVO_RIGHT_LID_UPPER] = 160
+                return True
+            except Exception as e:
+                self.logger.error(f"打開眼皮時發生錯誤: {e}")
+                return False
+        else:
+            # 模擬模式
+            self.servo_positions[self.SERVO_LEFT_LID_LOWER] = 160
+            self.servo_positions[self.SERVO_RIGHT_LID_LOWER] = 20
+            self.servo_positions[self.SERVO_LEFT_LID_UPPER] = 20
+            self.servo_positions[self.SERVO_RIGHT_LID_UPPER] = 160
+            return True
     
     def stop_natural_blinking(self):
-        """停止自然眨眼"""
+        """停止自然眨眼（兼容舊版本）"""
         self.natural_blinking = False
+        self.stop_led_blinking()
+        self.stop_eyelid_blinking()
+    
+    def stop_led_blinking(self):
+        """停止 LED 眨眼"""
+        self.logger.info("停止 LED 眨眼")
+        self.led_blinking = False
+    
+    def stop_eyelid_blinking(self):
+        """停止眼皮眨眼"""
+        self.logger.info("停止眼皮眨眼")
+        self.eyelid_blinking = False
     
     def start_arm_swinging(self):
         """開始手臂擺動"""
@@ -436,13 +546,32 @@ class ServoController:
         """檢查是否應該眨眼"""
         current_time = time.time()
         
+        # 檢查LED眨眼
+        if current_time > self.next_led_blink_time and self.led_blinking:
+            self.logger.debug("LED眨眼")
+            self._blink_leds()
+            self.next_led_blink_time = current_time + random.uniform(self.led_blink_interval_min, self.led_blink_interval_max)
+        
+        # 檢查眼皮眨眼
+        if current_time > self.next_eyelid_blink_time and self.eyelid_blinking:
+            self.logger.debug("眼皮眨眼")
+            self._blink_eyelids()
+            self.next_eyelid_blink_time = current_time + random.uniform(self.eyelid_blink_interval_min, self.eyelid_blink_interval_max)
+        
+        # 兼容舊版本的自然眨眼
         if current_time > self.next_blink_time and self.natural_blinking:
-            self.logger.debug("眨眼")
+            self.logger.debug("自然眨眼")
             self._blink()
             self.next_blink_time = current_time + random.uniform(self.blink_interval_min, self.blink_interval_max)
     
     def _blink(self):
-        """執行眨眼動作"""
+        """執行綜合眨眼動作（兼容舊版本）"""
+        # 同時執行 LED 和眼皮眨眼
+        self._blink_leds()
+        self._blink_eyelids()
+    
+    def _blink_leds(self):
+        """執行 LED 眨眼動作"""
         # 保存當前顏色
         with self.lock:
             saved_color = self.eye_color
@@ -454,30 +583,36 @@ class ServoController:
         # 恢復原來顏色
         self.set_eye_color(saved_color)
     
+    def _blink_eyelids(self):
+        """執行眼皮眨眼動作"""
+        # 關閉眼皮
+        self.close_eyelids()
+        
+        # 短暫停頓
+        time.sleep(1)
+        
+        # 打開眼皮
+        self.open_eyelids()
+    
     def raise_right_arm(self):
         """舉起右手臂"""
-        self.move_servo_smooth(self.SERVO_RIGHT_ARM_UPPER, 120, step_size=2, delay=0.02)
-        self.move_servo_smooth(self.SERVO_RIGHT_ARM_LOWER, 60, step_size=2, delay=0.02)
-    
+        self.move_servo_smooth(self.SERVO_RIGHT_ARM, 180, step_size=2, delay=0.02)
+      
     def raise_arms(self):
         """舉起雙手"""
         # 右手臂
-        self.move_servo_smooth(self.SERVO_RIGHT_ARM_UPPER, 120, step_size=2, delay=0.02)
-        self.move_servo_smooth(self.SERVO_RIGHT_ARM_LOWER, 60, step_size=2, delay=0.02)
+        self.move_servo_smooth(self.SERVO_RIGHT_ARM, 180, step_size=2, delay=0.02)
         
         # 左手臂
-        self.move_servo_smooth(self.SERVO_LEFT_ARM_UPPER, 60, step_size=2, delay=0.02)
-        self.move_servo_smooth(self.SERVO_LEFT_ARM_LOWER, 120, step_size=2, delay=0.02)
+        self.move_servo_smooth(self.SERVO_LEFT_ARM, 0, step_size=2, delay=0.02)
     
     def lower_arms(self):
         """放下雙手"""
         # 右手臂
-        self.move_servo_smooth(self.SERVO_RIGHT_ARM_UPPER, 160, step_size=2, delay=0.02)
-        self.move_servo_smooth(self.SERVO_RIGHT_ARM_LOWER, 20, step_size=2, delay=0.02)
+        self.move_servo_smooth(self.SERVO_RIGHT_ARM, 90, step_size=2, delay=0.02)
         
         # 左手臂
-        self.move_servo_smooth(self.SERVO_LEFT_ARM_UPPER, 20, step_size=2, delay=0.02)
-        self.move_servo_smooth(self.SERVO_LEFT_ARM_LOWER, 160, step_size=2, delay=0.02)
+        self.move_servo_smooth(self.SERVO_LEFT_ARM, 90, step_size=2, delay=0.02)
     
     def activate_laser(self):
         """啟動激光指示器"""

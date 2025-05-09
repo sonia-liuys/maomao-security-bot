@@ -8,6 +8,9 @@
 import logging
 import time
 from enum import Enum, auto
+import random
+import os
+from utils.audio_player import play_sound
 
 class RobotMode(Enum):
     """機器人運行模式枚舉"""
@@ -43,6 +46,15 @@ class ModeManager:
         self.student_id_detection_pause_until = 0
         self.alarm_active = False  # 添加警報狀態屬性
         self.websocket_server = None  # 將在RobotController中設置
+        
+        # 設置警報音效路徑
+        # Set alarm sound file path
+        self.alarm_sound_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "sound", "robot-bass.wav"
+        )
+        self.logger.info(f"警報音效文件路徑: {self.alarm_sound_file}")
+        self.logger.info(f"Alarm sound file path: {self.alarm_sound_file}")
         
         self.logger.info("模式管理器初始化完成")
         self.logger.info("Mode manager initialization complete")
@@ -308,6 +320,11 @@ class ModeManager:
                         self.alarm_active = True
                         self.logger.info("警報狀態已活躍")
                         self.logger.info("Alarm state activated")
+                        
+                        # 播放警報音效
+                        self.logger.info("播放警報音效")
+                        self.logger.info("Playing alarm sound")
+                        play_sound(self.alarm_sound_file, blocking=False)
         else:
             # 沒有檢測到人臉
             # 如果沒有入侵者且眼睛顏色不是綠色，且警報狀態未活躍，則設置為綠色

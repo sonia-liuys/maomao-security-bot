@@ -12,6 +12,7 @@ import time
 import cv2
 import numpy as np
 import os
+import platform
 from datetime import datetime
 
 # Real TensorFlow Lite import for actual deployment
@@ -246,7 +247,15 @@ class VisionSystem:
         self.logger = logging.getLogger("Vision")
         self.config = config
         
-        self.camera_index = config.get("camera_index", 0)
+        # Automatically select camera index based on platform
+        default_camera = 1 if platform.system() == "Linux" and os.path.exists("/etc/rpi-issue") else 0
+        self.logger.info(f"Detected platform: {platform.system()}, using default camera index: {default_camera}")
+        self.logger.info(f"檢測到平台: {platform.system()}, 使用默認相機索引: {default_camera}")
+        
+        self.camera_index = config.get("camera_index", default_camera)
+        self.logger.info(f"Final camera index from config: {self.camera_index}")
+        self.logger.info(f"配置中的最終相機索引: {self.camera_index}")
+        
         self.frame_width = config.get("frame_width", 640)
         self.frame_height = config.get("frame_height", 480)
         self.confidence_threshold = config.get("confidence_threshold", 0.9)  # 提高置信度閾值到 90%
@@ -340,7 +349,7 @@ class VisionSystem:
             return
             
         self.logger.info("Starting vision system...")
-        self.logger.info("啟動視覺系統...")
+        self.logger.info(f"啟動視覺系統..., Camera Index: {self.camera_index}")
         
         # Open camera
         # 打開攝像頭
@@ -600,11 +609,123 @@ class VisionSystem:
             dict: 視覺系統狀態
         """
         with self.lock:
-            return {
+            latest_data = self.latest_data
+            # 首先記錄最新数据中的值
+            # First log the values in the latest data
+            self.logger.info(f"VisionSystem.get_status: latest_data = {latest_data}")
+            
+            # 初始化狀態字典
+            # Initialize status dictionary
+            status = {
                 "camera_active": self.camera is not None and self.camera.isOpened(),
                 "resolution": f"{self.frame_width}x{self.frame_height}",
-                "face_detected": self.latest_data["face_detected"],
-                "recognized_person": self.latest_data["recognized_person"],
-                "student_id_detected": self.latest_data["student_id_detected"],
-                "confidence": self.latest_data["confidence"]
+                "face_detected": latest_data["face_detected"],
+                "recognized_person": latest_data["recognized_person"],
+                "student_id_detected": latest_data["student_id_detected"],
+                "confidence": latest_data["confidence"]
             }
+            
+            # 添加人臉座標
+            # Add face coordinates
+            if "face_x" in latest_data and "face_y" in latest_data:
+                try:
+                    status["face_x"] = latest_data["face_x"]
+                    status["face_y"] = latest_data["face_y"]
+                    self.logger.info(f"VisionSystem.get_status: 添加人臉座標到狀態中: x={status['face_x']:.2f}, y={status['face_y']:.2f}")
+                    self.logger.info(f"VisionSystem.get_status: Adding face coordinates to status: x={status['face_x']:.2f}, y={status['face_y']:.2f}")
+                except Exception as e:
+                    self.logger.error(f"VisionSystem.get_status: 提取人臉座標時出錯: {e}")
+                    self.logger.error(f"VisionSystem.get_status: Error extracting face coordinates: {e}")
+            else:
+                self.logger.warning("VisionSystem.get_status: latest_data 中沒有人臉座標信息")
+                self.logger.warning("VisionSystem.get_status: No face coordinates in latest_data")
+            
+            self.logger.info(f"VisionSystem.get_status: 返回狀態 = {status}")
+            return status
+    
+    def get_latest_data(self):
+        """Get the latest vision data
+        
+        Returns:
+            dict: The latest vision data
+            
+        獲取最新的視覺數據
+        
+        Returns:
+            dict: 最新的視覺數據
+        """
+        with self.lock:
+            return self.latest_data.copy()
+    
+    def get_latest_frame(self):
+        """Get the latest camera frame
+        
+        Returns:
+            numpy.ndarray: The latest camera frame, or None if not available
+            
+        獲取最新的攝像頭幀
+        
+        Returns:
+            numpy.ndarray: 最新的攝像頭幀，如果沒有則返回None
+        """
+        with self.lock:
+            if self.latest_frame is None:
+                return None
+            return self.latest_frame.copy()
+    
+    def get_timestamp(self):
+        """Get the timestamp of the latest data
+        
+        Returns:
+            float: Timestamp
+            
+        獲取最新數據的時間戳
+        
+        Returns:
+            float: 時間戳
+        """
+        with self.lock:
+            return self.latest_data["timestamp"]
+    
+    def get_status(self):
+        """Get vision system status
+        獲取視覺系統狀態
+        
+        Returns:
+            dict: Vision system status
+            dict: 視覺系統狀態
+        """
+        with self.lock:
+            latest_data = self.latest_data
+            # 首先記錄最新数据中的值
+            # First log the values in the latest data
+            self.logger.info(f"VisionSystem.get_status: latest_data = {latest_data}")
+            
+            # 初始化狀態字典
+            # Initialize status dictionary
+            status = {
+                "camera_active": self.camera is not None and self.camera.isOpened(),
+                "resolution": f"{self.frame_width}x{self.frame_height}",
+                "face_detected": latest_data["face_detected"],
+                "recognized_person": latest_data["recognized_person"],
+                "student_id_detected": latest_data["student_id_detected"],
+                "confidence": latest_data["confidence"]
+            }
+            
+            # 添加人臉座標
+            # Add face coordinates
+            if "face_x" in latest_data and "face_y" in latest_data:
+                try:
+                    status["face_x"] = latest_data["face_x"]
+                    status["face_y"] = latest_data["face_y"]
+                    self.logger.info(f"VisionSystem.get_status: 添加人臉座標到狀態中: x={status['face_x']:.2f}, y={status['face_y']:.2f}")
+                    self.logger.info(f"VisionSystem.get_status: Adding face coordinates to status: x={status['face_x']:.2f}, y={status['face_y']:.2f}")
+                except Exception as e:
+                    self.logger.error(f"VisionSystem.get_status: 提取人臉座標時出錯: {e}")
+                    self.logger.error(f"VisionSystem.get_status: Error extracting face coordinates: {e}")
+            else:
+                self.logger.warning("VisionSystem.get_status: latest_data 中沒有人臉座標信息")
+                self.logger.warning("VisionSystem.get_status: No face coordinates in latest_data")
+            
+            self.logger.info(f"VisionSystem.get_status: 返回狀態 = {status}")
+            return status

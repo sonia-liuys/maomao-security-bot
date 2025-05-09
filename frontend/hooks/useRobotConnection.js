@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-const useRobotConnection = (url = 'ws://localhost:8765') => {
+const useRobotConnection = (url = 'ws://192.168.1.147:8765') => {
   // 在服務器端渲染時返回預設值
   if (typeof window === 'undefined') {
     console.log('useRobotConnection: 在服務器端渲染時返回預設值');
@@ -153,17 +153,31 @@ const useRobotConnection = (url = 'ws://localhost:8765') => {
               return;
             }
             
-            // 處理ping/pong消息
-            if (event.data === 'ping' || event.data === 'pong') {
-              console.log(`收到${event.data}消息`);
-              if (event.data === 'ping') {
-                try {
-                  ws.send('pong');
-                  console.log('已回覆pong');
-                } catch (error) {
-                  console.error('發送pong回覆失敗:', error);
+            // 處理特殊格式消息
+            // 檢查是否為 JSON 格式
+            const startsWithOpenBrace = event.data.trim().startsWith('{');
+            const startsWithOpenBracket = event.data.trim().startsWith('[');
+            const isPotentialJson = startsWithOpenBrace || startsWithOpenBracket;
+
+            // 如果不像是 JSON，則直接處理為特殊格式消息
+            if (!isPotentialJson) {
+              // 特殊字符串消息處理
+              if (event.data === 'ping' || event.data === 'pong') {
+                console.log(`收到${event.data}消息`);
+                if (event.data === 'ping') {
+                  try {
+                    ws.send('pong');
+                    console.log('已回覆pong');
+                  } catch (error) {
+                    console.error('發送pong回覆失敗:', error);
+                  }
                 }
+                return;
               }
+
+              // 其他非 JSON 格式的消息，只進行記錄不嘗試處理
+              console.log('收到非 JSON 格式的消息:', event.data.substring(0, 50) + 
+                (event.data.length > 50 ? '...' : ''));
               return;
             }
             
@@ -192,6 +206,16 @@ const useRobotConnection = (url = 'ws://localhost:8765') => {
             } else if (data.type === 'status_update' || data.type === 'status') {
               // 狀態更新消息
               console.log('收到狀態更新:', data.type);
+              
+              // 添加更詳細的日誌，檢查人臉座標數據
+              // Add more detailed log, check face coordinates data
+              console.log('[DEBUG] 收到的狀態更新包含以下數據:', {
+                face_detected: data.data?.face_detected,
+                face_x: data.data?.face_x,
+                face_y: data.data?.face_y,
+                recognized_person: data.data?.recognized_person
+              });
+              
               setRobotStatus(prev => ({
                 ...prev,
                 ...data.data

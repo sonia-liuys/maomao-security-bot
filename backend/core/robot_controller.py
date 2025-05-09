@@ -77,6 +77,12 @@ class RobotController:
         # Pass WebSocket server instance to mode manager
         self.mode_manager.websocket_server = self.websocket_server
         
+        # 將視覺系統實例傳遞給WebSocket服務器
+        # Pass vision system instance to WebSocket server
+        self.websocket_server.set_vision_system(self.vision_system)
+        self.logger.info("將視覺系統實例傳遞給WebSocket服務器")
+        self.logger.info("Passed vision system instance to WebSocket server")
+        
         self.logger.info("Robot controller initialization complete")
         self.logger.info("機器人控制器初始化完成")
     

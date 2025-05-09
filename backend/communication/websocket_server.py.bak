@@ -44,21 +44,10 @@ class WebSocketServer:
         self.lock = threading.Lock()
         self.video_streaming = False  # 視頻流狀態 (Video streaming status)
         self.video_interval = 0.1  # 視頻幀發送間隔，秒 (Video frame sending interval in seconds)
-        self.vision_system = None  # 視覺系統實例 (Vision system instance)
+        self.face_detection_enabled = False  # 人臉識別功能狀態 (Face detection status)
         
         self.logger.info(f"WebSocket服務器初始化完成 (端口: {port})")
         self.logger.info(f"WebSocket server initialization complete (port: {port})")
-        
-    def set_vision_system(self, vision_system):
-        """設置視覺系統實例
-        Set vision system instance
-        
-        Args:
-            vision_system: 視覺系統實例 (Vision system instance)
-        """
-        self.vision_system = vision_system
-        self.logger.info("設置視覺系統實例成功")
-        self.logger.info("Successfully set vision system instance")
         
     def _is_connection_closed(self, websocket):
         """安全地檢查WebSocket連接是否已關閉
@@ -149,6 +138,10 @@ class WebSocketServer:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
+        # 存儲事件循環供其他網絡操作使用
+        # Store event loop for other network operations
+        self.loop = loop
+        
         async def start_server_async():
             return await websockets.serve(self._handle_client, "0.0.0.0", self.port)
         
@@ -168,7 +161,7 @@ class WebSocketServer:
             self.server.close()
             return asyncio.ensure_future(self.server.wait_closed())
     
-    async def _handle_client(self, websocket, path=None):
+    async def _handle_client(self, websocket):
         """處理客戶端連接
         
         Args:
@@ -279,45 +272,57 @@ class WebSocketServer:
             
             return
         
-        elif command_type == "get_status":
+        elif command_type in ["toggle_face_detection", "start_face_detection", "stop_face_detection"]:
+            # 處理開啟/關閉人臉識別命令
+            # Handle face detection commands
+            if command_type == "toggle_face_detection":
+                enabled = command_data.get("enabled", False)
+            elif command_type == "start_face_detection":
+                enabled = True
+            else:  # stop_face_detection
+                enabled = False
+                
+            self.face_detection_enabled = enabled
+            
+            self.logger.info(f"人臉識別功能已{'開啟' if enabled else '關閉'}")
+            self.logger.info(f"Face detection {'enabled' if enabled else 'disabled'}")
+            
+            response = {
+                'type': 'command_response',
+                'data': {
+                    'status': 'success',
+                    'message': f"Face detection {'enabled' if enabled else 'disabled'}"
+                },
+                'id': command_id
+            }
+        elif command_type == 'get_status':
             # 處理獲取狀態命令
             # Handle get status command
             await self._send_status(websocket)
             return
-        
-        elif command_type == "start_video_stream":
+        elif command_type == 'start_video_stream':
             # 處理開始視頻流命令
             # Handle start video stream command
             with self.lock:
-                self.video_clients.add(websocket)
-            
-            self.logger.info(f"客戶端已添加到視頻流列表，當前視頻客戶端數量: {len(self.video_clients)}")
-            self.logger.info(f"Client added to video stream list, current video clients: {len(self.video_clients)}")
-            
+                if websocket not in self.video_clients:
+                    self.video_clients.add(websocket)
+                    self.logger.info(f"客戶端已添加到視頻流列表，當前視頻客戶端數量: {len(self.video_clients)}")
+                    self.logger.info(f"Client added to video stream list, current video clients: {len(self.video_clients)}")
+                
             # 如果視頻流尚未啟動，則啟動它
-            # Start video streaming if not already started
+            # Start video stream if not already started
             if not self.video_streaming:
                 self.start_video_streaming()
-            
+                
             response = {
-                "type": "command_response",
-                "data": {
-                    "success": True,
-                    "message": "Video streaming started",
-                    "message_cht": "視頻流已啟動"
+                'type': 'command_response',
+                'data': {
+                    'status': 'success',
+                    'message': 'Video streaming started'
                 },
-                "id": command_id
+                'id': command_id
             }
-            
-            try:
-                await websocket.send(json.dumps(response))
-            except Exception as e:
-                self.logger.error(f"發送視頻流啟動響應時出錯: {e}")
-                self.logger.error(f"Error sending video stream start response: {e}")
-            
-            return
-        
-        elif command_type == "stop_video_stream":
+        elif command_type == 'stop_video_stream':
             # 處理停止視頻流命令
             # Handle stop video stream command
             with self.lock:
@@ -477,19 +482,6 @@ class WebSocketServer:
                 if status is None:
                     status = self.status_provider()
                 
-                # 新增調試日誌，檢查人臉座標是否存在
-                # Add debug log, check if face coordinates exist
-                if status:
-                    self.logger.info(f"WebSocketServer.broadcast_status: 狀態数据包含客户端所需的人臉坐标数据: face_x={status.get('face_x', 'missing')}, face_y={status.get('face_y', 'missing')}")
-                    self.logger.info(f"WebSocketServer.broadcast_status: Status data contains face coordinates needed by client: face_x={status.get('face_x', 'missing')}, face_y={status.get('face_y', 'missing')}")
-                    
-                    # 確保人臉座標以浮點數格式傳送
-                    # Ensure face coordinates are transmitted as float
-                    if 'face_x' in status and status['face_x'] is not None:
-                        status['face_x'] = float(status['face_x'])
-                    if 'face_y' in status and status['face_y'] is not None:
-                        status['face_y'] = float(status['face_y'])
-            
                 # 構建狀態消息
                 # Build status message
                 message = {
@@ -524,223 +516,204 @@ class WebSocketServer:
             self.logger.error(f"Error broadcasting status: {e}")
     
     async def _broadcast(self, message, clients):
-        """向所有客戶端廣播消息
-        Broadcast message to all clients
+        """向一組客戶端廣播消息
+        Broadcast message to a group of clients
         
         Args:
-            message (str): 要廣播的消息 (Message to broadcast)
-            clients (list): 客戶端列表 (Client list)
+            message (str): 要發送的消息 / Message to send
+            clients (list): 客戶端列表 / List of clients
+            
+        Returns:
+            int: 成功發送的消息數量 / Number of successfully sent messages
         """
         if not clients:
-            return
-        
-        # 創建所有發送任務
-        # Create all send tasks
-        send_tasks = []
-        for client in clients:
-            if self._is_connection_closed(client):
-                continue
+            return 0
             
-            # 創建發送任務
-            # Create send task
-            task = asyncio.ensure_future(self._send_to_client(client, message))
-            send_tasks.append(task)
+        # 記錄廣播開始
+        # Log broadcast start
+        self.logger.debug(f"開始廣播消息到 {len(clients)} 個客戶端")
+        self.logger.debug(f"Starting broadcast to {len(clients)} clients")
         
-        # 等待所有任務完成
-        # Wait for all tasks to complete
-        if send_tasks:
-            await asyncio.gather(*send_tasks, return_exceptions=True)
+        # 分割長消息的日誌
+        # Log long message in chunks
+        message_length = len(message)
+        if message_length > 200:
+            self.logger.debug(f"消息長度: {message_length} 字符")
+            self.logger.debug(f"消息開頭: {message[:50]}...")
+            self.logger.debug(f"消息結尾: ...{message[-50:]}")
+        
+        # 對所有客戶端併發發送消息
+        # Send message to all clients concurrently
+        results = await asyncio.gather(*[
+            self._safe_send(client, message) for client in clients
+        ], return_exceptions=True)
+        
+        # 計算成功和失敗的發送數量
+        # Calculate successful and failed sends
+        successes = sum(1 for r in results if r is True)
+        failures = sum(1 for r in results if r is False or isinstance(r, Exception))
+        
+        self.logger.debug(f"廣播完成: {successes} 成功, {failures} 失敗")
+        self.logger.debug(f"Broadcast complete: {successes} success, {failures} failed")
+        
+        return successes
     
-    async def _send_to_client(self, client, message):
-        """發送消息到客戶端
-        Send message to client
+    async def _safe_send(self, websocket, message):
+        """安全地發送消息到WebSocket客戶端
+        Safely send message to WebSocket client
         
         Args:
-            client: WebSocket客戶端
-            message (str): 要發送的消息
+            websocket: WebSocket客戶端對象 / WebSocket client object
+            message (str): 要發送的消息 / Message to send
+            
+        Returns:
+            bool: 是否成功發送 / Whether send was successful
         """
         try:
-            await client.send(message)
-            return True
-        except websockets.exceptions.ConnectionClosed:
-            # 連接已關閉，從客戶端集合中移除
-            # Connection closed, remove from client set
-            with self.lock:
-                self.clients.discard(client)
-                self.video_clients.discard(client)
-            return False
-        except Exception as e:
-            self.logger.error(f"發送消息到客戶端時出錯: {e}")
-            self.logger.error(f"Error sending message to client: {e}")
-            return False
-    
-    def _video_streaming_loop(self):
-        """視頻流主循環
-        Video streaming main loop"""
-        import numpy as np
-        import cv2
-        from datetime import datetime
-        
-        self.logger.info("啟動視頻流循環")
-        self.logger.info("Starting video streaming loop")
-        
-        # 視頻流循環參數
-        # Video streaming loop parameters
-        last_frame_time = 0
-        frame_count = 0    # 幀計數器，用於動畫效果
-        error_count = 0    # 錯誤計數器
-        max_errors = 5     # 最大連續錯誤數
-        
-        # 使用 VisionSystem 的攝像頭
-        # Use VisionSystem's camera
-        camera = None
-        try:
-            # 檢查是否有視覺系統實例
-            # Check if vision system instance is available
-            if self.vision_system is not None:
-                self.logger.info("使用 VisionSystem 的攝像頭實例")
-                self.logger.info("Using VisionSystem's camera instance")
-                # 不需要打開新的攝像頭，我們將直接從 VisionSystem 獲取幀
-                # No need to open a new camera, we will get frames directly from VisionSystem
+            if websocket.open:
+                await websocket.send(message)
+                return True
             else:
-                self.logger.warning("找不到視覺系統實例，將使用模擬視頻")
-                self.logger.warning("Could not find vision system instance, will use simulated video")
+                # WebSocket已關閉
+                # WebSocket already closed
+                self.logger.debug(f"嘗試發送到已關閉的WebSocket")
+                self.logger.debug(f"Attempted to send to closed WebSocket")
+                
+                # 移除非活動客戶端
+                # Remove inactive client
+                self._remove_client(websocket)
+                return False
+        except websockets.exceptions.ConnectionClosed as e:
+            self.logger.info(f"連接已關閉，無法發送消息: {e}")
+            self.logger.info(f"Connection closed, cannot send message: {e}")
+            # 移除非活動客戶端
+            # Remove inactive client
+            self._remove_client(websocket)
+            return False
         except Exception as e:
-            self.logger.error(f"初始化攝像頭時出錯: {e}")
-            self.logger.error(f"Error initializing camera: {e}")
-            camera = None
-        
-        # 主視頻流循環
-        # Main video streaming loop
-        while self.video_streaming and self.running:
-            try:
-                # 檢查是否有視頻客戶端
-                # Check if there are video clients
-                with self.lock:
-                    if not self.video_clients:
-                        time.sleep(0.1)
-                        continue
-                
-                # 獲取當前時間
-                # Get current time
-                current_time = time.time()
-                
-                # 檢查是否應該發送新幀
-                # Check if should send new frame
-                if current_time - last_frame_time < self.video_interval:
-                    time.sleep(0.01)  # 短暫休眠以減少CPU使用率
-                    continue
+            self.logger.error(f"發送消息時出錯: {type(e).__name__}: {e}")
+            self.logger.error(f"Error sending message: {type(e).__name__}: {e}")
+            return False
+            
+    def _video_streaming_loop(self):
+        """視頁流主循環
+        Video streaming main loop"""
+{{ ... }}
+                        self.logger.warning("使用預設尺寸: 640x480")
+                        self.logger.warning("Using default dimensions: 640x480")
                 
                 try:
-                    # 獲取當前時間戳
-                    current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                    # 使用更高的圖像尺寸以提高清晰度
+                # Use higher image resolution for better clarity
+                self.logger.debug(f"調整前的圖像尺寸: {frame.shape}")
+                small_frame = cv2.resize(frame, (480, 360))
+                self.logger.debug(f"調整後的圖像尺寸: {small_frame.shape}")
+                
+                # 使用更高的圖像質量
+                # Use higher image quality - 80% quality for better text readability
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+                success, buffer = cv2.imencode('.jpg', small_frame, encode_param)
+                
+                if not success:
+                    self.logger.error("將圖像編碼為JPEG失敗")
+                    self.logger.error("Failed to encode image to JPEG")
+                    continue
                     
-                    # 從 VisionSystem 獲取幀
-                    # Get frame from VisionSystem
-                    if self.vision_system is not None:
-                        vision_frame = self.vision_system.get_latest_frame()
-                        if vision_frame is not None:
-                            self.logger.debug("從 VisionSystem 獲取到幀")
-                            self.logger.debug("Got frame from VisionSystem")
-                            frame = vision_frame
-                            height, width = frame.shape[:2]
-                        else:
-                            self.logger.warning("無法從 VisionSystem 獲取幀，將使用模擬視頻")
-                            self.logger.warning("Cannot get frame from VisionSystem, will use simulated video")
-                            # 創建一個模擬幀作為備用
-                            # Create a simulated frame as fallback
-                            height, width = 480, 640
-                            frame = np.zeros((height, width, 3), dtype=np.uint8)
-                            frame[:, :] = (30, 30, 50)  # 藍色背景 / Blue background
-                            
-                            # 添加動畫效果 / Add animation
-                            center_x = int(width/2 + width/4 * np.sin(frame_count * 0.05))
-                            center_y = int(height/2 + height/4 * np.cos(frame_count * 0.05))
-                            cv2.circle(frame, (center_x, center_y), 30, (0, 165, 255), -1)
-                            
-                            # 添加文字說明這是模擬視頻
-                            # Add text explaining this is simulated video
-                            cv2.putText(frame, f'Vision System Error - Simulated Video', (width - 350, height - 20), 
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-                    else:
-                        # 如果沒有 VisionSystem，創建一個模擬幀
-                        # If no VisionSystem, create a simulated frame
-                        height, width = 480, 640
-                        frame = np.zeros((height, width, 3), dtype=np.uint8)
-                        frame[:, :] = (30, 30, 50)  # 藍色背景 / Blue background
-                        
-                        # 添加動畫效果 / Add animation
-                        center_x = int(width/2 + width/4 * np.sin(frame_count * 0.05))
-                        center_y = int(height/2 + height/4 * np.cos(frame_count * 0.05))
-                        cv2.circle(frame, (center_x, center_y), 30, (0, 165, 255), -1)
-                    
-                    # 增加幀計數器 / Increment frame counter
-                    frame_count += 1
-                    
-                    # 添加文字 / Add text
-                    cv2.putText(frame, f'MaoMao Robot Camera', (20, 30), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 200, 255), 1)
-                    cv2.putText(frame, f'Time: {current_timestamp}', (20, 60), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+                self.logger.debug(f"JPEG緩衝區大小: {len(buffer)} 字節")
+                
+                # 編碼為 Base64
+                # Encode to Base64
+                try:
+                    jpg_as_text = base64.b64encode(buffer).decode('utf-8')
+                    self.logger.debug(f"Base64編碼成功，長度: {len(jpg_as_text)} 字符")
                 except Exception as e:
-                    self.logger.error(f"創建模擬幀時出錯: {e}")
-                    self.logger.error(f"Error creating simulated frame: {e}")
-                    # 創建一個簡單的錯誤幀
-                    height, width = 480, 640  # 確保在錯誤情況下也有定義 width 和 height
-                    frame = np.zeros((height, width, 3), dtype=np.uint8)
-                    cv2.putText(frame, f'Error: {str(e)[:30]}', (50, 50), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                    self.logger.error(f"Base64編碼失敗: {e}")
+                    self.logger.error(f"Base64 encoding failed: {e}")
+                    continue
+                    
+                    # 創建基本的視頁幀消息
+                    # Create basic video frame message
+                    video_message = {
+                        "type": "video_frame",
+{{ ... }}
+                        log_message['data']['image'] = f'[BASE64 IMAGE DATA: {len(jpg_as_text)} bytes (reduced quality)]'
+                    
+                    # 在日誌中記錄消息（不包含圖像數據）
+                    # Log the message (without image data)
+                    self.logger.debug(f"發送視頁幀消息: {log_message}")
+                    try:
+                    # 序列化為 JSON
+                    # Serialize to JSON
+                    message_json = json.dumps(video_message)
+                    
+                    # 詳細記錄JSON內容（不包含圖像數據）
+                    debug_message = video_message.copy()
+                    if 'data' in debug_message and 'image' in debug_message['data']:
+                        debug_message['data'] = debug_message['data'].copy()
+                        image_length = len(debug_message['data']['image'])
+                        debug_message['data']['image'] = f'[BASE64 IMAGE: {image_length} chars]'
+                    
+                    self.logger.debug(f"視頻幀JSON消息內容: {debug_message}")
+                    self.logger.debug(f"Video frame JSON message content: {debug_message}")
+                    
+                    # 驗證JSON格式是否正確
+                    # Validate JSON format
+                    _ = json.loads(message_json)  # 測試能否被解析
+                    self.logger.debug(f"JSON驗證成功, 長度: {len(message_json)} 字符")
+                    self.logger.debug(f"JSON validation successful, length: {len(message_json)} chars")
+                except Exception as e:
+                    self.logger.error(f"JSON serialization error: {e}")
+                    self.logger.error(f"Problematic message: {str(video_message)[:200]}...")
+                    # 創建一個簡化的失敗消息
+                    message_json = json.dumps({
+{{ ... }}
+                        "data": {
+                            "message": "Video frame encoding failed",
+                            "timestamp": current_time
+                        }
+                    })
                 
-                # 確保 width 和 height 在所有代碼路徑中都有定義
-                # Ensure width and height are defined in all code paths
-                if 'width' not in locals() or 'height' not in locals():
-                    height, width = frame.shape[:2]  # 從幀中提取尺寸
-                    self.logger.info(f"從幀中提取尺寸: {width}x{height}")
-                    self.logger.info(f"Extracted dimensions from frame: {width}x{height}")
-                
-                # 降低JPEG品質以減少帶寬使用
-                # Lower JPEG quality to reduce bandwidth usage
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
-                _, buffer = cv2.imencode('.jpg', frame, encode_param)
-                
-                # 將圖像編碼為base64
-                # Encode image to base64
-                jpg_as_text = base64.b64encode(buffer).decode('utf-8')
-                
-                # 構建視頻幀消息
-                # Build video frame message
-                video_message = {
-                    "type": "video_frame",
-                    "data": {
-                        "image": jpg_as_text,
-                        "timestamp": current_time,
-                        "width": width,
-                        "height": height
-                    }
-                }
-                
-                # 序列化為JSON
-                # Serialize to JSON
-                message_json = json.dumps(video_message)
-                
-                # 廣播到所有視頻客戶端
+                # 廣播到所有視頁客戶端
                 # Broadcast to all video clients
                 with self.lock:
                     video_clients = list(self.video_clients)
                 
+                # 添加時間戳到視頁幀消息
+                # Add timestamp to video frame message
+                video_message['data']['timestamp'] = int(current_time * 1000)  # 毫秒時間戳
+                
                 if video_clients:
                     try:
-                        # 創建新的事件循環
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
+                        # 記錄客戶端數量
+                        self.logger.debug(f"準備發送視頻幀到 {len(video_clients)} 個客戶端")
+                        self.logger.debug(f"Preparing to send video frame to {len(video_clients)} clients")
                         
-                        # 實際發送消息
-                        loop.run_until_complete(self._broadcast(message_json, video_clients))
-                        loop.close()
+                        # 使用現有的事件循環而不是創建新的
+                        # Use existing event loop instead of creating a new one
+                        future = asyncio.run_coroutine_threadsafe(
+                            self._broadcast(message_json, video_clients),
+                            self.loop
+                        )
+                        
+                        # 等待短時間，檢查是否成功發送
+                        try:
+                            # 只等待很短的時間，避免阻塞流
+                            result = future.result(0.01)
+                            self.logger.debug(f"視頻幀廣播結果: {result}")
+                        except asyncio.TimeoutError:
+                            # 正常，因為我們只等待很短時間
+                            pass
+                        except Exception as e:
+                            self.logger.error(f"廣播視頻幀時出錯: {e}")
+                            self.logger.error(f"Error broadcasting video frame: {e}")
                         
                         # 更新最後發送幀的時間
                         last_frame_time = current_time
                         error_count = 0  # 重置錯誤計數器
+                        
+                        # 記錄成功發送視頻幀
+                        self.logger.debug(f"成功發送視頻幀，時間戳: {int(current_time * 1000)}")
+                        self.logger.debug(f"Successfully sent video frame, timestamp: {int(current_time * 1000)}")
                     except websockets.exceptions.ConnectionClosedOK as e:
                         self.logger.info(f"在發送視頻幀期間連接關閉: {e}")
                         self.logger.info(f"Connection closed during video frame send: {e}")
@@ -762,18 +735,18 @@ class WebSocketServer:
                     self.logger.warning("沒有視頻客戶端或發送失敗")
                     self.logger.warning("No video clients or sending failed")
                     time.sleep(0.1)
-            except Exception as e:
-                self.logger.error(f"視頻流循環中出錯: {e}")
-                self.logger.error(f"Error in video streaming loop: {e}")
-                error_count += 1
-                if error_count >= max_errors:
-                    self.logger.error(f"連續發生 {error_count} 個錯誤，重新檢查客戶端列表")
-                    self.logger.error(f"Consecutive {error_count} errors, rechecking client list")
-                    # 清理客戶端列表，移除已關閉的連接
-                    with self.lock:
-                        self.video_clients = {client for client in self.video_clients if not self._is_connection_closed(client)}
-                    error_count = 0  # 重置錯誤計數器
-                time.sleep(0.5)  # 出錯時稍微長一點的休眠
+            # except Exception as e:
+            #     self.logger.error(f"視頻流循環中出錯: {e}")
+            #     self.logger.error(f"Error in video streaming loop: {e}")
+            #     error_count += 1
+            #     if error_count >= max_errors:
+            #         self.logger.error(f"連續發生 {error_count} 個錯誤，重新檢查客戶端列表")
+            #         self.logger.error(f"Consecutive {error_count} errors, rechecking client list")
+            #         # 清理客戶端列表，移除已關閉的連接
+            #         with self.lock:
+            #             self.video_clients = {client for client in self.video_clients if not self._is_connection_closed(client)}
+            #         error_count = 0  # 重置錯誤計數器
+            #     time.sleep(0.5)  # 出錯時稍微長一點的休眠
         
         self.logger.info("視頻流循環已結束")
         self.logger.info("Video streaming loop ended")

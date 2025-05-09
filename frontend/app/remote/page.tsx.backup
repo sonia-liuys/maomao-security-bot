@@ -18,8 +18,8 @@ import {
   Eye,
   EyeOff,
   Clock,
-  Scan,
-  User
+  UserRound,
+  UserCheck
 } from "lucide-react"
 import Navigation from "@/components/navigation"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
@@ -40,9 +40,6 @@ interface RobotMessage {
     recognized_person?: string;
     confidence?: number;
     emoji?: string;
-    face_detected?: boolean;
-    face_x?: number;
-    face_y?: number;
     [key: string]: any;
   };
   id?: string;
@@ -57,9 +54,11 @@ export default function RemoteMode() {
   const [alarmActive, setAlarmActive] = useState(false)
   const [statusMessage, setStatusMessage] = useState("Ready to assist")
   const [faceDetectionActive, setFaceDetectionActive] = useState(false)
+  const [detectedFaces, setDetectedFaces] = useState<{name: string, confidence: number, x: number, y: number, width: number, height: number}[]>([])
+  const [frameRate, setFrameRate] = useState(0)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   
-  const { isConnected, setRobotMode, sendCommand, lastMessage, robotStatus } = useRobotConnection()
+  const { isConnected, setRobotMode, sendCommand, lastMessage } = useRobotConnection()
   // 將lastMessage轉換為RobotMessage類型
   const typedLastMessage = lastMessage as RobotMessage | null
   // 使用ref追蹤是否已經發送過命令
@@ -218,29 +217,20 @@ export default function RemoteMode() {
     };
   }, [videoActive, isConnected, sendCommand])
 
-  // 處理視頻幀消息
+  // 記錄上一個視頁幀的時間戳
+  // Track the timestamp of the last video frame
+  const lastFrameTimestampRef = useRef<number>(0);
+  
+  // 處理視頁幀消息
   useEffect(() => {
-    // 記錄詳細日誌，包含人臉識別資訊
+    // 只在開發模式下記錄詳細日誌
     if (process.env.NODE_ENV === 'development') {
-      console.log("視頻幀處理效果觸發，狀態:", {
+      console.log("視頁幀處理效果觸發，狀態:", {
         videoActive,
         hasCanvas: !!canvasRef.current,
         hasLastMessage: !!lastMessage,
-        messageType: lastMessage ? typeof lastMessage : 'none',
-        faceDetectionActive,
+        messageType: lastMessage ? typeof lastMessage : 'none'
       });
-      
-      // 檢查是否收到人臉識別數據
-      if (lastMessage && typeof lastMessage === 'object') {
-        const msgObj = lastMessage as RobotMessage;
-        const msgData = msgObj.data || {};
-        console.log("[DEBUG] 人臉識別數據檢查:", { 
-          face_detected: msgData.face_detected, 
-          face_x: msgData.face_x, 
-          face_y: msgData.face_y,
-          recognized_person: msgData.recognized_person
-        });
-      }
     }
     
     // 檢查必要條件
@@ -276,8 +266,34 @@ export default function RemoteMode() {
       return;
     }
     
-    // 檢查是否是視頻幀消息
+    // 檢查是否是視頁幀消息
     if (messageType === "video_frame" && messageData && messageData.image) {
+      // 檢查是否是新的視頁幀（根據時間戳）
+      // Check if this is a new video frame (based on timestamp)
+      const currentTimestamp = messageData.timestamp || Date.now();
+      
+      // 如果時間戳小於或等於上一個幀的時間戳，則跳過處理
+      // Skip processing if timestamp is less than or equal to the last frame's timestamp
+      if (currentTimestamp <= lastFrameTimestampRef.current) {
+        console.log(`跳過處理舊的視頁幀 (時間戳: ${currentTimestamp}, 上一個: ${lastFrameTimestampRef.current})`);
+        return;
+      }
+      
+      // 更新最後一個視頁幀的時間戳
+      // Update the timestamp of the last processed frame
+      lastFrameTimestampRef.current = currentTimestamp;
+      
+      // 檢查人臉檢測信息
+      if (messageData.face_detected) {
+        console.log("收到人臉檢測信息:", {
+          timestamp: currentTimestamp,
+          face_detected: messageData.face_detected,
+          face_x: messageData.face_x,
+          face_y: messageData.face_y,
+          recognized_person: messageData.recognized_person,
+          confidence: messageData.confidence
+        });
+      }
       // 獲取畫布和上下文
       const canvas = canvasRef.current;
       const ctx = canvas.getContext("2d");
@@ -310,6 +326,9 @@ export default function RemoteMode() {
         // 應用縮放
         const scaledWidth = img.width * zoomLevel;
         const scaledHeight = img.height * zoomLevel;
+        
+        // 清除畫布後不需要額外的重置操作
+        // No need for additional reset after clearing canvas
         
         // 計算圖像在畫布中的位置，保持縱橫比
         const imgRatio = scaledWidth / scaledHeight;
@@ -365,6 +384,90 @@ export default function RemoteMode() {
           }
         }
 
+        // 只在明確啟用人臉檢測功能且確實檢測到人臉時才繪製人臉框
+        // Only draw face box when face detection is explicitly enabled and a face is actually detected
+        if (faceDetectionActive && 
+            messageData && 
+            messageData.face_detected === true && 
+            typeof messageData.face_x === 'number' && 
+            typeof messageData.face_y === 'number' &&
+            messageData.face_x >= 0 && messageData.face_x <= 1 &&
+            messageData.face_y >= 0 && messageData.face_y <= 1) {
+          
+          // 添加更詳細的日誌記錄
+          // Add more detailed logging
+          console.log("繪製人臉框，詳細信息:", {
+            timestamp: currentTimestamp,
+            face_x: messageData?.face_x,
+            face_y: messageData?.face_y,
+            recognized: messageData?.recognized_person ? "是" : "否",
+            person: messageData?.recognized_person || "未知",
+            confidence: messageData?.confidence || 0
+          });
+          
+          // 不需要清除和重繪，因為我們已經在上面繪製了圖像
+          // No need to clear and redraw, as we already drew the image above
+          
+          // 計算人臉在畫布上的位置
+          // Calculate face position on canvas
+          const faceX = drawX + (messageData?.face_x || 0) * drawWidth;
+          const faceY = drawY + (messageData?.face_y || 0) * drawHeight;
+          
+          // 繪製人臉框 (估計大小)
+          // Draw face box (estimated size)
+          const faceSize = Math.min(drawWidth, drawHeight) * 0.2; // 估計人臉大小為畫布的20% / Estimate face size as 20% of canvas
+          
+          // 只在有有效的人臉位置時才繪製框
+          // Only draw box when there is a valid face position
+          if (faceX >= drawX && faceX <= drawX + drawWidth && 
+              faceY >= drawY && faceY <= drawY + drawHeight) {
+            // 使用不同顏色標示已識別和未識別的人臉
+            // Use different colors to mark recognized and unrecognized faces
+            const isRecognized = !!messageData?.recognized_person;
+            ctx.strokeStyle = isRecognized ? "#00ff00" : "#ff0000";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.rect(faceX - faceSize/2, faceY - faceSize/2, faceSize, faceSize);
+            ctx.stroke();
+            
+            // 合併顯示人臉識別標籤和座標信息
+            // Merge display of face recognition label and coordinate information
+            ctx.font = "12px monospace";
+            ctx.fillStyle = "#ffffff";
+            ctx.textAlign = "left";
+            
+            // 準備要顯示的文字
+            // Prepare text to display
+            let displayText = `X: ${messageData?.face_x?.toFixed(2) || '0.00'}, Y: ${messageData?.face_y?.toFixed(2) || '0.00'}`;
+            
+            // 如果有識別出的人，將人名和置信度也加入顯示文字
+            // If there is a recognized person, add the name and confidence to the display text
+            if (messageData?.recognized_person) {
+              const confidence = typeof messageData?.confidence === 'number' ? messageData.confidence : 0;
+              displayText = `${messageData.recognized_person} (${(confidence * 100).toFixed(1)}%) | ${displayText}`;
+              
+              // 已識別人臉使用綠色文字
+              // Use green text for recognized faces
+              ctx.fillStyle = "#00ff00";
+            } else {
+              // 未識別人臉使用白色文字
+              // Use white text for unrecognized faces
+              displayText = `Unknown | ${displayText}`;
+            }
+            
+            // 在人臉框下方顯示文字
+            ctx.fillText(
+              displayText,
+              faceX - faceSize/2,
+              faceY + faceSize/2 + 15
+            );
+            
+            // 時間戳和狀態信息會在下面的代碼中顯示
+            // Time stamp and status information will be displayed in the code below
+          }
+        }
+      }
+        
         // 添加時間戳和狀態信息
         const now = new Date();
         const timeString = now.toLocaleTimeString();
@@ -376,89 +479,28 @@ export default function RemoteMode() {
         // 添加縮放和旋轉信息
         ctx.textAlign = "right";
         ctx.fillText(`Zoom: ${zoomLevel.toFixed(1)}x | Rotation: ${rotation}°`, canvas.width - 10, canvas.height - 10);
-        
-        // 如果啟用了人臉識別且檢測到人臉，繪製人臉框和座標
-        // 從 robotStatus 而不是 messageData 中獲取人臉座標數據
-        console.log("[DEBUG] 繪製人臉框檢查 - 狀態中的數據:", { 
-          faceDetectionActive, 
-          robotStatus: {
-            face_detected: robotStatus && 'face_detected' in robotStatus ? robotStatus.face_detected : undefined,
-            face_x: robotStatus && 'face_x' in robotStatus ? robotStatus.face_x : undefined, 
-            face_y: robotStatus && 'face_y' in robotStatus ? robotStatus.face_y : undefined
-          }
-        });
-        // 使用類型斷言與可選鏈安全地訪問 robotStatus 屬性
-        if (faceDetectionActive && robotStatus && 'face_detected' in robotStatus && robotStatus.face_detected === true) {
-          try {
-            // 獲取人臉座標（基於原始圖像的相對座標，範圍 0-1）
-            // 確保在計算中是數字類型
-            const faceX: number = ('face_x' in robotStatus && typeof robotStatus.face_x === 'number') ? Number(robotStatus.face_x) : 0.5;
-            const faceY: number = ('face_y' in robotStatus && typeof robotStatus.face_y === 'number') ? Number(robotStatus.face_y) : 0.5;
-            
-            // 將相對坐標轉換為畫布上的實際坐標
-            const canvasFaceX = drawX + faceX * drawWidth;
-            const canvasFaceY = drawY + faceY * drawHeight;
-            
-            // 設置繪製樣式
-            ctx.strokeStyle = "#00ff00"; // 綠色
-            ctx.lineWidth = 2;
-            
-            // 繪製面部框（假設面部框大小固定或者根據置信度調整）
-            const boxSize = Math.min(drawWidth, drawHeight) * 0.15; // 15% 的寬高
-            
-            // 繪製面部框
-            ctx.beginPath();
-            ctx.rect(
-              canvasFaceX - boxSize / 2,
-              canvasFaceY - boxSize / 2,
-              boxSize,
-              boxSize
-            );
-            ctx.stroke();
-            
-            // 繪製十字標記
-            const crossSize = boxSize / 4;
-            ctx.beginPath();
-            ctx.moveTo(canvasFaceX - crossSize, canvasFaceY);
-            ctx.lineTo(canvasFaceX + crossSize, canvasFaceY);
-            ctx.moveTo(canvasFaceX, canvasFaceY - crossSize);
-            ctx.lineTo(canvasFaceX, canvasFaceY + crossSize);
-            ctx.stroke();
-            
-            // 添加座標文本
-            ctx.font = "12px monospace";
-            ctx.fillStyle = "#00ff00";
-            ctx.textAlign = "left";
-            ctx.fillText(
-              `X: ${(faceX * 100).toFixed(1)}%, Y: ${(faceY * 100).toFixed(1)}%`,
-              canvasFaceX + boxSize / 2 + 5,
-              canvasFaceY
-            );
-            
-            // 如果有識別出的人名，顯示在框上方
-            // 使用 robotStatus 獲取已識別的人名和置信度
-            if ('recognized_person' in robotStatus && robotStatus.recognized_person) {
-              const confidence = 'confidence' in robotStatus && typeof robotStatus.confidence === 'number' ? 
-                Number(robotStatus.confidence) : undefined;
-              const confidenceText = confidence !== undefined 
-                ? ` (${(confidence * 100).toFixed(0)}%)` 
-                : '';
-              ctx.fillText(
-                `${robotStatus.recognized_person}${confidenceText}`,
-                canvasFaceX - boxSize / 2,
-                canvasFaceY - boxSize / 2 - 5
-              );
-            }
-          } catch (error) {
-            console.error("繪製人臉識別顯示時出錯:", error);
-          }
-        }
       }
 
+      // 創建新圖像並設置事件處理
+      const img = new Image();
+      
+      // 設置圖像加載錯誤處理
+      img.onerror = (err) => {
+        console.error("圖像加載失敗:", err);
+        // 顯示錯誤信息
+        ctx.fillStyle = "#0a1520";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.font = "14px sans-serif";
+        ctx.fillStyle = "#ff4040";
+        ctx.textAlign = "center";
+        ctx.fillText("視頻幀加載失敗", canvas.width / 2, canvas.height / 2);
+        ctx.fillText("Video frame loading failed", canvas.width / 2, canvas.height / 2 + 20);
+      };
+      
       // 設置圖像源為base64編碼的圖像
       try {
-        // 確保base64字符串有效
-        if (typeof messageData.image === 'string' && messageData.image.length > 0) {
+        // 確保messageData不為null且base64字符串有效
+        if (messageData && typeof messageData.image === 'string' && messageData.image.length > 0) {
           const base64Str = messageData.image;
           if (base64Str.length > 10) { // 簡單的有效性檢查
             img.src = `data:image/jpeg;base64,${base64Str}`;
@@ -472,49 +514,44 @@ export default function RemoteMode() {
         console.error("設置圖像源時出錯:", error);
       }
     }
-  }, [lastMessage, videoActive])
+  }, [lastMessage, videoActive, zoomLevel, rotation, faceDetectionActive]);
 
   const handleZoomIn = () => {
-    setZoomLevel((prev) => Math.min(prev + 0.1, 2))
-  }
+    setZoomLevel((prev) => Math.min(prev + 0.1, 2));
+  };
 
   const handleZoomOut = () => {
-    setZoomLevel((prev) => Math.max(prev - 0.1, 0.5))
-  }
+    setZoomLevel((prev) => Math.max(prev - 0.1, 0.5));
+  };
 
   const handleRotate = () => {
-    setRotation((prev) => (prev + 45) % 360)
-  }
+    setRotation((prev) => (prev + 45) % 360);
+  };
 
   const toggleCamera = () => {
-    setVideoActive(!videoActive)
-    setStatusMessage(videoActive ? "Camera disabled" : "Camera enabled")
-  }
+    setVideoActive(!videoActive);
+    setStatusMessage(videoActive ? "Camera disabled" : "Camera enabled");
+  };
 
   const handleRaiseHand = () => {
-    setHandsUp(true)
-    setStatusMessage("Hands raised")
-  }
-  
-  const toggleFaceDetection = () => {
-    setFaceDetectionActive(!faceDetectionActive)
-    setStatusMessage(faceDetectionActive ? "Face detection disabled" : "Face detection enabled")
-  }
+    setHandsUp(true);
+    setStatusMessage("Hands raised");
+  };
 
   const handleLowerHand = () => {
-    setHandsUp(false)
-    setStatusMessage("Hands lowered")
-  }
+    setHandsUp(false);
+    setStatusMessage("Hands lowered");
+  };
 
   const handleOpenEyes = () => {
-    setEyesOpen(true)
-    setStatusMessage("Eyes opened")
-  }
+    setEyesOpen(true);
+    setStatusMessage("Eyes opened");
+  };
 
   const handleCloseEyes = () => {
-    setEyesOpen(false)
-    setStatusMessage("Eyes closed")
-  }
+    setEyesOpen(false);
+    setStatusMessage("Eyes closed");
+  };
 
   const handleClearAlarm = () => {
     console.log('發送解除警報命令');
@@ -527,12 +564,25 @@ export default function RemoteMode() {
     
     setAlarmActive(false);
     setStatusMessage('警報已解除');
-  }
+  };
 
   const handlePowerOff = () => {
-    setStatusMessage("Powering off...")
+    setStatusMessage("Powering off...");
     // In a real app, this would trigger a shutdown sequence
-  }
+  };
+
+  const toggleFaceDetection = () => {
+    const newState = !faceDetectionActive;
+    setFaceDetectionActive(newState);
+    
+    // 發送命令到後端
+    sendCommand({
+      type: newState ? 'start_face_detection' : 'stop_face_detection',
+      data: {}
+    });
+    
+    setStatusMessage(newState ? "人臉檢測已啟動" : "人臉檢測已停止");
+  };
 
   return (
     <main className="flex min-h-screen flex-col items-center p-4 bg-[#050a10] text-white grid-bg">
@@ -541,29 +591,47 @@ export default function RemoteMode() {
         <div className="flex justify-between items-center mb-4">
           <div className="text-[#50bedc] text-sm">CAMERA FEED</div>
           <div className="flex gap-2">
-            <Button variant="outline" size="icon" onClick={toggleCamera} className="h-8 w-8 border-[#50bedc]/30 text-[#50bedc]">
-              {videoActive ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
-              <span className="sr-only">{videoActive ? "Disable" : "Enable"} Camera</span>
-            </Button>
-            <Button variant="outline" size="icon" onClick={handleZoomIn} className="h-8 w-8 border-[#50bedc]/30 text-[#50bedc]">
+            <Button
+              variant="outline"
+              size="icon"
+              className="border-[#50bedc]/30 text-[#50bedc] h-8 w-8"
+              onClick={handleZoomIn}
+            >
               <Maximize className="h-4 w-4" />
-              <span className="sr-only">Zoom In</span>
             </Button>
-            <Button variant="outline" size="icon" onClick={handleZoomOut} className="h-8 w-8 border-[#50bedc]/30 text-[#50bedc]">
+            <Button
+              variant="outline"
+              size="icon"
+              className="border-[#50bedc]/30 text-[#50bedc] h-8 w-8"
+              onClick={handleZoomOut}
+            >
               <Minimize className="h-4 w-4" />
-              <span className="sr-only">Zoom Out</span>
             </Button>
-            <Button variant="outline" size="icon" onClick={handleRotate} className="h-8 w-8 border-[#50bedc]/30 text-[#50bedc]">
+            <Button
+              variant="outline"
+              size="icon"
+              className="border-[#50bedc]/30 text-[#50bedc] h-8 w-8"
+              onClick={handleRotate}
+            >
               <RotateCw className="h-4 w-4" />
-              <span className="sr-only">Rotate</span>
             </Button>
-            <Button 
-              variant={faceDetectionActive ? "default" : "outline"} 
-              size="icon" 
+            <Button
+              variant="outline"
+              size="icon"
+              className={`${faceDetectionActive ? "border-red-500/30 text-red-400" : "border-[#50bedc]/30 text-[#50bedc]"} h-8 w-8`}
               onClick={toggleFaceDetection}
-              className="h-8 w-8 border-[#50bedc]/30 text-[#50bedc]">
-              <User className="h-4 w-4" />
-              <span className="sr-only">{faceDetectionActive ? "Disable" : "Enable"} Face Detection</span>
+              disabled={!videoActive}
+              title="人臉識別"
+            >
+              {faceDetectionActive ? <UserCheck className="h-4 w-4" /> : <UserRound className="h-4 w-4" />}
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className={`${videoActive ? "border-[#50bedc]/30 text-[#50bedc]" : "border-red-500/30 text-red-400"} h-8 w-8`}
+              onClick={toggleCamera}
+            >
+              {videoActive ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
             </Button>
           </div>
         </div>

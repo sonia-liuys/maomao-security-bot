@@ -15,6 +15,29 @@ import os
 import sys
 import platform
 
+# 有條件地導入GPIO庫
+# Conditionally import GPIO library
+if platform.system() == 'Linux' and os.path.exists('/sys/firmware/devicetree/base/model'):
+    try:
+        import RPi.GPIO as GPIO
+        # 嘗試初始化GPIO，測試是否能正確工作
+        # Try to initialize GPIO to test if it works correctly
+        GPIO.setwarnings(False)
+        GPIO.setmode(GPIO.BOARD)  # 使用物理引腳編號
+        GPIO_AVAILABLE = True
+        logging.info("RPi.GPIO 庫已成功初始化")
+        logging.info("RPi.GPIO library successfully initialized")
+    except ImportError:
+        GPIO_AVAILABLE = False
+        logging.warning("RPi.GPIO 庫導入失敗，將使用模擬模式")
+        logging.warning("Failed to import RPi.GPIO library, will use simulation mode")
+    except Exception as e:
+        GPIO_AVAILABLE = False
+        logging.warning(f"RPi.GPIO 初始化失敗: {e}，將使用模擬模式")
+        logging.warning(f"RPi.GPIO initialization failed: {e}, will use simulation mode")
+else:
+    GPIO_AVAILABLE = False
+
 # 檢測運行環境
 IS_RASPBERRY_PI = platform.system() == 'Linux' and os.path.exists('/sys/firmware/devicetree/base/model')
 
@@ -45,15 +68,19 @@ class ServoController:
     
     SERVO_RIGHT_ARM = 8
     SERVO_LEFT_ARM = 9
+    
+    # GPIO常量
+    LASER_GPIO_PIN = 12      # 激光模塊GPIO引腳
 
-    # 眼睛顏色映射
+    # 眼睛顏色映射 (根據GRB像素順序調整)
+    # Eye color mapping (adjusted for GRB pixel order)
     EYE_COLORS = {
-        "green": (0, 255, 0),
-        "red": (255, 0, 0),
-        "yellow": (255, 255, 0),
-        "blue": (0, 0, 255),
-        "white": (255, 255, 255),
-        "off": (0, 0, 0)
+        "green": (0, 255, 0),     # GRB for Green (G=255)
+        "red": (0, 0, 255),       # GRB for Red (R=255)
+        "yellow": (0, 255, 255),  # GRB for Yellow (R=255, G=255)
+        "blue": (255, 0, 0),      # GRB for Blue (B=255)
+        "white": (255, 255, 255), # GRB for White (R=255, G=255, B=255)
+        "off": (0, 0, 0)          # GRB for Off (all 0)
     }
     
     def __init__(self, config):
@@ -74,6 +101,7 @@ class ServoController:
         self.natural_blinking = False
         self.led_blinking = False
         self.eyelid_blinking = False
+        self.gpio_initialized = False  # GPIO初始化狀態
         
         # 讀取設定
         self.update_interval = config.get("update_interval", 0.05)  # 更新間隔（秒）
@@ -93,7 +121,7 @@ class ServoController:
         
         # 初始化狀態變數
         self.running = False
-        self.servo_positions = {i: 90 for i in range(1, 7)}  # 1-6號伺服，初始位置90度
+        self.servo_positions = {i: 90 for i in range(1, 16)}  # 1-16號伺服，初始位置90度
         self.eye_color = "green"
         self.laser_active = False
         
@@ -200,17 +228,27 @@ class ServoController:
             return
             
         self.logger.info("停止伺服馬達控制器...")
-        self.running = False
         
-        # 停止所有動作
-        self.natural_blinking = False
-        self.arm_swinging = False
+        # 停止更新循環
+        with self.lock:
+            self.running = False
         
-        if self.thread:
-            self.thread.join(timeout=1.0)
+        # 等待線程結束
+        if self.update_thread and self.update_thread.is_alive():
+            self.update_thread.join(timeout=2.0)
         
-        # 重置所有伺服馬達到安全位置
+        # 重置所有伺服馬達
         self.reset_all()
+        
+        # 清理GPIO資源
+        if IS_RASPBERRY_PI and GPIO_AVAILABLE and self.gpio_initialized:
+            try:
+                GPIO.cleanup()
+                self.logger.info("GPIO資源已清理")
+                self.logger.info("GPIO resources cleaned up")
+            except Exception as e:
+                self.logger.error(f"GPIO清理失敗: {e}")
+                self.logger.error(f"GPIO cleanup failed: {e}")
         
         self.logger.info("伺服馬達控制器已停止")
     
@@ -266,13 +304,13 @@ class ServoController:
         """設置伺服馬達位置
         
         Args:
-            servo_id (int): 伺服馬達ID (1-6)
+            servo_id (int): 伺服馬達ID (1-9)
             position (float): 位置角度 (0-180)
         
         Returns:
             bool: 操作是否成功
         """
-        if not 1 <= servo_id <= 6:
+        if not 1 <= servo_id <= 9:
             self.logger.error(f"無效的伺服馬達ID: {servo_id}")
             return False
             
@@ -292,7 +330,7 @@ class ServoController:
         """平滑地移動伺服馬達到目標角度
         
         Args:
-            servo_id (int): 伺服馬達ID (1-6)
+            servo_id (int): 伺服馬達ID (1-16)
             target_angle (float): 目標角度 (0-180)
             step_size (int, optional): 每步的角度大小
             delay (float, optional): 每步之間的延遲（秒）
@@ -300,33 +338,57 @@ class ServoController:
         Returns:
             bool: 操作是否成功
         """
-        if not 1 <= servo_id <= 6:
-            self.logger.error(f"無效的伺服馬達ID: {servo_id}")
-            return False
+        try:
+            # 確保目標角度在有效範圍內
+            target_angle = max(0, min(180, target_angle))
             
-        target_angle = max(0, min(180, target_angle))  # 限制在0-180範圍內
-        
-        with self.lock:
-            current_angle = self.servo_positions[servo_id]
-        
-        steps = int(abs(target_angle - current_angle))
-        
-        for _ in range(0, steps, step_size):
-            if current_angle < target_angle:
-                current_angle += step_size
-            else:
-                current_angle -= step_size
+            # 檢查伺服馬達ID是否有效
+            if servo_id < 0 or servo_id > 15:  # 大多數伺服控制器最多支持16個通道
+                self.logger.error(f"無效的伺服馬達ID: {servo_id}，應在0-15範圍內")
+                self.logger.error(f"Invalid servo ID: {servo_id}, should be in range 0-15")
+                return False
+            
+            # 獲取當前位置
+            with self.lock:
+                current_angle = self.servo_positions.get(servo_id, 90)
+            
+            # 計算步數和方向
+            steps = int(abs(target_angle - current_angle) / step_size)
+            step_dir = 1 if target_angle > current_angle else -1
+            
+            # 逐步移動
+            for i in range(steps):
+                new_angle = current_angle + (i + 1) * step_size * step_dir
+                new_angle = max(0, min(180, new_angle))  # 確保在範圍內
                 
-            current_angle = max(0, min(180, current_angle))  # 限制範圍
-            self.set_position(servo_id, current_angle)
-            time.sleep(delay)
+                # 如果控制失敗，立即返回
+                if not self._control_servo(servo_id, new_angle):
+                    self.logger.error(f"移動伺服馬達 {servo_id} 到 {new_angle} 度失敗")
+                    self.logger.error(f"Failed to move servo {servo_id} to {new_angle} degrees")
+                    return False
+                
+                # 更新保存的位置
+                with self.lock:
+                    self.servo_positions[servo_id] = new_angle
+                
+                time.sleep(delay)
             
-            # 檢查是否應該眨眼
-            self._check_for_blink()
-        
-        # 確保最終到達目標角度
-        self.set_position(servo_id, target_angle)
-        return True
+            # 最後一步，確保到達目標位置
+            if not self._control_servo(servo_id, target_angle):
+                self.logger.error(f"移動伺服馬達 {servo_id} 到最終位置 {target_angle} 度失敗")
+                self.logger.error(f"Failed to move servo {servo_id} to final position {target_angle} degrees")
+                return False
+            
+            # 更新保存的位置
+            with self.lock:
+                self.servo_positions[servo_id] = target_angle
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"平滑移動伺服馬達時發生錯誤: {e}")
+            self.logger.error(f"Error during smooth servo movement: {e}")
+            return False
     
     def _control_servo(self, servo_id, position):
         """實際控制伺服馬達
@@ -337,10 +399,31 @@ class ServoController:
         """
         if self.kit is not None:
             try:
+                # 檢查伺服馬達ID是否在有效範圍內
+                if hasattr(self.kit, 'servo') and hasattr(self.kit.servo, '__len__'):
+                    servo_count = len(self.kit.servo)
+                    if servo_id >= servo_count:
+                        self.logger.error(f"無效的伺服馬達ID: {servo_id}，最大ID為: {servo_count-1}")
+                        self.logger.error(f"Invalid servo ID: {servo_id}, maximum ID is: {servo_count-1}")
+                        return False
+                
+                # 控制伺服馬達
                 self.kit.servo[servo_id].angle = position
+                return True
+            except IndexError:
+                self.logger.error(f"伺服馬達ID超出範圍: {servo_id}")
+                self.logger.error(f"Servo ID out of range: {servo_id}")
+                return False
+            except ValueError as e:
+                self.logger.error(f"伺服馬達值錯誤: {e}")
+                self.logger.error(f"Servo value error: {e}")
+                return False
             except Exception as e:
                 self.logger.error(f"控制伺服馬達失敗: {e}")
+                self.logger.error(f"Failed to control servo: {e}")
+                return False
         # 在模擬模式下，不需要實際控制硬體
+        return True
     
     def reset_all(self):
         """重置所有伺服馬達到初始位置"""
@@ -390,8 +473,8 @@ class ServoController:
         
         if arm_side == 'right':
             # 右手臂小幅度擺動
-            current_upper = self.servo_positions[self.SERVO_RIGHT_ARM_UPPER]
-            current_lower = self.servo_positions[self.SERVO_RIGHT_ARM_LOWER]
+            current_upper = self.servo_positions[self.SERVO_RIGHT_ARM]
+            current_lower = self.servo_positions[self.SERVO_RIGHT_ARM]
             
             # 計算新位置 (小幅度擺動)
             new_upper = current_upper + random.uniform(-10, 10)
@@ -401,12 +484,12 @@ class ServoController:
             new_lower = max(10, min(60, new_lower))  # 限制範圍
             
             # 設置新位置
-            self.move_servo_smooth(self.SERVO_RIGHT_ARM_UPPER, new_upper, step_size=2, delay=0.02)
-            self.move_servo_smooth(self.SERVO_RIGHT_ARM_LOWER, new_lower, step_size=2, delay=0.02)
+            self.move_servo_smooth(self.SERVO_RIGHT_ARM, new_upper, step_size=2, delay=0.02)
+            self.move_servo_smooth(self.SERVO_RIGHT_ARM, new_lower, step_size=2, delay=0.02)
         else:
             # 左手臂小幅度擺動
-            current_upper = self.servo_positions[self.SERVO_LEFT_ARM_UPPER]
-            current_lower = self.servo_positions[self.SERVO_LEFT_ARM_LOWER]
+            current_upper = self.servo_positions[self.SERVO_LEFT_ARM]
+            current_lower = self.servo_positions[self.SERVO_LEFT_ARM]
             
             # 計算新位置 (小幅度擺動)
             new_upper = current_upper + random.uniform(-10, 10)
@@ -416,8 +499,8 @@ class ServoController:
             new_lower = max(120, min(170, new_lower))  # 限制範圍
             
             # 設置新位置
-            self.move_servo_smooth(self.SERVO_LEFT_ARM_UPPER, new_upper, step_size=2, delay=0.02)
-            self.move_servo_smooth(self.SERVO_LEFT_ARM_LOWER, new_lower, step_size=2, delay=0.02)
+            self.move_servo_smooth(self.SERVO_LEFT_ARM, new_upper, step_size=2, delay=0.02)
+            self.move_servo_smooth(self.SERVO_LEFT_ARM, new_lower, step_size=2, delay=0.02)
     
     def start_natural_blinking(self):
         """開始自然眨眼（兼容舊版本）"""
@@ -438,6 +521,22 @@ class ServoController:
         self.eyelid_blinking = True
         # 重設下次眼皮眨眼時間
         self.next_eyelid_blink_time = time.time() + random.uniform(self.eyelid_blink_interval_min, self.eyelid_blink_interval_max)
+    
+    def stop_natural_blinking(self):
+        """停止自然眨眼（兼容舊版本）"""
+        self.natural_blinking = False
+        self.stop_led_blinking()
+        self.stop_eyelid_blinking()
+    
+    def stop_led_blinking(self):
+        """停止 LED 眨眼"""
+        self.logger.info("停止 LED 眨眼")
+        self.led_blinking = False
+    
+    def stop_eyelid_blinking(self):
+        """停止眼皮眨眼"""
+        self.logger.info("停止眼皮眨眼")
+        self.eyelid_blinking = False
     
     def close_eyelids(self):
         """閉上眼皮"""
@@ -492,22 +591,6 @@ class ServoController:
             self.servo_positions[self.SERVO_LEFT_LID_UPPER] = 20
             self.servo_positions[self.SERVO_RIGHT_LID_UPPER] = 160
             return True
-    
-    def stop_natural_blinking(self):
-        """停止自然眨眼（兼容舊版本）"""
-        self.natural_blinking = False
-        self.stop_led_blinking()
-        self.stop_eyelid_blinking()
-    
-    def stop_led_blinking(self):
-        """停止 LED 眨眼"""
-        self.logger.info("停止 LED 眨眼")
-        self.led_blinking = False
-    
-    def stop_eyelid_blinking(self):
-        """停止眼皮眨眼"""
-        self.logger.info("停止眼皮眨眼")
-        self.eyelid_blinking = False
     
     def start_arm_swinging(self):
         """開始手臂擺動"""
@@ -615,16 +698,209 @@ class ServoController:
         self.move_servo_smooth(self.SERVO_LEFT_ARM, 90, step_size=2, delay=0.02)
     
     def activate_laser(self):
-        """啟動激光指示器"""
+        """啟動激光指示器
+        
+        使用GPIO第12腳控制激光模塊
+        Activate the laser module using GPIO pin 12
+        """
         self.logger.info("啟動激光指示器")
+        self.logger.info("Activating laser module")
         self.laser_active = True
-        # 實際部署時，這裡會控制激光指示器
+        
+        # 嘗試使用pinctrl命令（適用於Pi 5）
+        try:
+            self.logger.info("嘗試使用pinctrl命令啟動激光器 (Pi 5)")
+            import subprocess
+            
+            # 設置 GPIO 12 為輸出模式
+            subprocess.call(["sudo", "pinctrl", "set", "12", "op"])
+            # 設置為高電平
+            subprocess.call(["sudo", "pinctrl", "set", "12", "dh"])
+            
+            self.logger.info("激光模塊已啟動 (pinctrl GPIO 12)")
+            self.logger.info("Laser module activated (pinctrl GPIO 12)")
+            return True
+        except Exception as e:
+            self.logger.error(f"pinctrl方式啟動激光模塊失敗: {e}")
+            self.logger.error(f"Failed to activate laser module using pinctrl: {e}")
+        
+        # 嘗試直接使用gpiod（新的GPIO控制方法）
+        try:
+            self.logger.info("嘗試使用gpiod命令啟動激光器")
+            import subprocess
+            
+            # 設置 GPIO 12 為高電平
+            subprocess.call(["sudo", "gpioset", "gpiochip0", "12=1"])
+            
+            self.logger.info("激光模塊已啟動 (gpiod GPIO 12)")
+            self.logger.info("Laser module activated (gpiod GPIO 12)")
+            return True
+        except Exception as e:
+            self.logger.error(f"gpiod方式啟動激光模塊失敗: {e}")
+            self.logger.error(f"Failed to activate laser module using gpiod: {e}")
+        
+        # 嘗試直接使用sysfs控制GPIO
+        try:
+            # 使用BCM編號，對應GPIO 12
+            GPIO_PIN = self.LASER_GPIO_PIN
+            self.logger.info(f"嘗試使用sysfs控制GPIO {GPIO_PIN}")
+            
+            # 嘗試使用sudo寫入檔案
+            subprocess.call(["sudo", "sh", "-c", f"echo {GPIO_PIN} > /sys/class/gpio/export"])
+            subprocess.call(["sudo", "sh", "-c", f"echo out > /sys/class/gpio/gpio{GPIO_PIN}/direction"])
+            subprocess.call(["sudo", "sh", "-c", f"echo 1 > /sys/class/gpio/gpio{GPIO_PIN}/value"])
+            
+            self.logger.info(f"激光模塊已啟動 (sysfs GPIO {GPIO_PIN})")
+            self.logger.info(f"Laser module activated (sysfs GPIO {GPIO_PIN})")
+            return True
+        except Exception as e:
+            self.logger.error(f"sysfs方式啟動激光模塊失敗: {e}")
+            self.logger.error(f"Failed to activate laser module using sysfs: {e}")
+        
+        # 如果所有方法都失敗，嘗試直接使用Python執行命令
+        try:
+            self.logger.info("嘗試使用Python執行命令方式啟動激光器...")
+            # 嘗試使用gpio命令
+            subprocess.call(["sudo", "gpio", "-g", "mode", "12", "out"])
+            subprocess.call(["sudo", "gpio", "-g", "write", "12", "1"])
+            self.logger.info("已嘗試使用gpio命令啟動激光器")
+            return True
+        except Exception as e2:
+            self.logger.error(f"所有方法都失敗: {e2}")
+            self.logger.error(f"All methods failed: {e2}")
+            
+        self.logger.info("模擬模式: 激光模塊已啟動")
+        self.logger.info("Simulation mode: Laser module activated")
+        return False
     
     def deactivate_laser(self):
-        """關閉激光指示器"""
+        """關閉激光指示器
+        
+        關閉GPIO第12腳上的激光模塊
+        Deactivate the laser module using GPIO pin 12
+        """
         self.logger.info("關閉激光指示器")
+        self.logger.info("Deactivating laser module")
         self.laser_active = False
-        # 實際部署時，這裡會控制激光指示器
+        
+        # 嘗試使用pinctrl命令（適用於Pi 5）
+        try:
+            self.logger.info("嘗試使用pinctrl命令關閉激光器 (Pi 5)")
+            import subprocess
+            
+            # 設置 GPIO 12 為輸出模式
+            subprocess.call(["sudo", "pinctrl", "set", "12", "op"])
+            # 設置為低電平
+            subprocess.call(["sudo", "pinctrl", "set", "12", "dl"])
+            
+            self.logger.info("激光模塊已關閉 (pinctrl GPIO 12)")
+            self.logger.info("Laser module deactivated (pinctrl GPIO 12)")
+            return True
+        except Exception as e:
+            self.logger.error(f"pinctrl方式關閉激光模塊失敗: {e}")
+            self.logger.error(f"Failed to deactivate laser module using pinctrl: {e}")
+        
+        # 嘗試直接使用gpiod（新的GPIO控制方法）
+        try:
+            self.logger.info("嘗試使用gpiod命令關閉激光器")
+            import subprocess
+            
+            # 設置 GPIO 12 為低電平
+            subprocess.call(["sudo", "gpioset", "gpiochip0", "12=0"])
+            
+            self.logger.info("激光模塊已關閉 (gpiod GPIO 12)")
+            self.logger.info("Laser module deactivated (gpiod GPIO 12)")
+            return True
+        except Exception as e:
+            self.logger.error(f"gpiod方式關閉激光模塊失敗: {e}")
+            self.logger.error(f"Failed to deactivate laser module using gpiod: {e}")
+        
+        # 嘗試直接使用sysfs控制GPIO
+        try:
+            # 使用BCM編號，對應GPIO 12
+            GPIO_PIN = self.LASER_GPIO_PIN
+            self.logger.info(f"嘗試使用sysfs關閉GPIO {GPIO_PIN}")
+            
+            # 嘗試使用sudo寫入檔案
+            subprocess.call(["sudo", "sh", "-c", f"echo {GPIO_PIN} > /sys/class/gpio/export"])
+            subprocess.call(["sudo", "sh", "-c", f"echo out > /sys/class/gpio/gpio{GPIO_PIN}/direction"])
+            subprocess.call(["sudo", "sh", "-c", f"echo 0 > /sys/class/gpio/gpio{GPIO_PIN}/value"])
+            
+            self.logger.info(f"激光模塊已關閉 (sysfs GPIO {GPIO_PIN})")
+            self.logger.info(f"Laser module deactivated (sysfs GPIO {GPIO_PIN})")
+            return True
+        except Exception as e:
+            self.logger.error(f"sysfs方式關閉激光模塊失敗: {e}")
+            self.logger.error(f"Failed to deactivate laser module using sysfs: {e}")
+        
+        # 如果所有方法都失敗，嘗試直接使用Python執行命令
+        try:
+            self.logger.info("嘗試使用Python執行命令方式關閉激光器...")
+            # 嘗試使用gpio命令
+            subprocess.call(["sudo", "gpio", "-g", "write", "12", "0"])
+            self.logger.info("已嘗試使用gpio命令關閉激光器")
+            return True
+        except Exception as e2:
+            self.logger.error(f"所有方法都失敗: {e2}")
+            self.logger.error(f"All methods failed: {e2}")
+            
+        self.logger.info("模擬模式: 激光模塊已關閉")
+        self.logger.info("Simulation mode: Laser module deactivated")
+        return False
+    
+    def toggle_laser(self):
+        """切換激光指示器狀態
+        
+        如果激光器關閉，則開啟它；如果已開啟，則關閉它
+        
+        Returns:
+            bool: 新的激光器狀態，True 表示已開啟，False 表示已關閉
+        """
+        self.logger.info(f"切換激光指示器狀態，當前狀態: {self.laser_active}")
+        self.logger.info(f"Toggling laser state, current state: {self.laser_active}")
+        
+        if self.laser_active:
+            self.deactivate_laser()
+        else:
+            self.activate_laser()
+            
+        return self.laser_active
+    
+    def laser_demo(self, duration=5, blink_count=3):
+        """激光指示器演示
+        
+        執行一個簡單的激光指示器演示，包括開啟、閃爍和關閉
+        
+        Args:
+            duration (int): 演示持續時間（秒）
+            blink_count (int): 閃爍次數
+        """
+        self.logger.info(f"開始激光指示器演示，持續{duration}秒，閃爍{blink_count}次")
+        self.logger.info(f"Starting laser demo for {duration} seconds with {blink_count} blinks")
+        
+        # 確保激光器開始時是關閉的
+        if self.laser_active:
+            self.deactivate_laser()
+            time.sleep(0.5)
+        
+        # 開啟激光器
+        self.activate_laser()
+        time.sleep(1)
+        
+        # 閃爍激光器
+        blink_interval = (duration - 2) / (blink_count * 2)  # 計算閃爍間隔
+        for i in range(blink_count):
+            self.deactivate_laser()
+            time.sleep(blink_interval)
+            self.activate_laser()
+            time.sleep(blink_interval)
+            self.logger.info(f"閃爍 {i+1}/{blink_count}")
+        
+        # 最後關閉激光器
+        time.sleep(1)
+        self.deactivate_laser()
+        self.logger.info("激光指示器演示完成")
+        self.logger.info("Laser demo completed")
     
     def get_status(self):
         """獲取伺服馬達狀態

@@ -231,6 +231,30 @@ class RobotController:
             self.websocket_server.stop_video_streaming()
             
             return {"success": True, "message": "Video streaming stopped", "message_cht": "視頻流已停止"}
+        
+        elif cmd_type == "start_patrol":
+            # 處理開始巡邏命令
+            # Handle start patrol command
+            self.logger.info("收到開始巡邏命令")
+            self.logger.info("Received start patrol command")
+            
+            # 確保機器人處於巡邏模式
+            if self.mode_manager.current_mode != RobotMode.PATROL:
+                self.mode_manager.set_mode(RobotMode.PATROL)
+            
+            # 使用移動控制器的 start_patrol 方法啟動巡邏
+            self.logger.info("正在啟動巡邏模式下的小車移動...")
+            self.logger.info("Starting car movement in patrol mode...")
+            success = self.movement_controller.start_patrol()
+            
+            if success:
+                self.logger.info("巡邏模式已成功啟動")
+                self.logger.info("Patrol mode successfully started")
+                return {"success": True, "message": "Patrol started", "message_cht": "巡邏已開始"}
+            else:
+                self.logger.error("啟動巡邏模式失敗")
+                self.logger.error("Failed to start patrol mode")
+                return {"success": False, "message": "Failed to start patrol", "message_cht": "無法開始巡邏"}
             
         else:
             return {"success": False, "message": "未知命令"}

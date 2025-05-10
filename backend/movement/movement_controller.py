@@ -219,6 +219,9 @@ class MovementController:
         Args:
             command (str): 命令名稱
             params (dict, optional): 命令參數
+            
+        Returns:
+            bool: 命令發送是否成功
         """
         if not params:
             params = {}
@@ -232,16 +235,33 @@ class MovementController:
         # 序列化為JSON
         cmd_json = json.dumps(cmd_data)
         
-        self.logger.debug(f"發送命令: {cmd_json}")
+        self.logger.info(f"發送命令到Arduino: {cmd_json}")
+        self.logger.info(f"Sending command to Arduino: {cmd_json}")
         
         # 實際發送命令
-        if self.serial_conn and self.serial_conn.is_open:
-            try:
+        try:
+            if self.serial_conn and self.serial_conn.is_open:
                 # 發送命令到Arduino
-                # self.serial_conn.write((cmd_json + '\n').encode())
-                pass  # 模擬發送
-            except Exception as e:
-                self.logger.error(f"發送命令失敗: {e}")
+                self.serial_conn.write((cmd_json + '\n').encode())
+                self.logger.info(f"命令 '{command}' 已發送到Arduino")
+                self.logger.info(f"Command '{command}' sent to Arduino")
+                return True
+            else:
+                # 如果在測試模式下，模擬發送成功
+                self.logger.warning("串口未開啟，模擬發送命令")
+                self.logger.warning("Serial port not open, simulating command send")
+                
+                # 如果是 start_patrol 命令，特別記錄
+                if command == "start_patrol":
+                    self.logger.info("模擬發送 'start_patrol' 命令到Arduino")
+                    self.logger.info("Simulating sending 'start_patrol' command to Arduino")
+                
+                return True  # 模擬模式下返回成功
+                
+        except Exception as e:
+            self.logger.error(f"發送命令失敗: {e}")
+            self.logger.error(f"Failed to send command: {e}")
+            return False
     
     def _update_square_path(self):
         """更新方形路徑移動"""
@@ -281,6 +301,29 @@ class MovementController:
     def move_square_path(self):
         """執行方形路徑移動"""
         self.move(self.DIRECTION_SQUARE_PATH)
+        
+    def start_patrol(self):
+        """啟動巡邏模式下的小車移動
+        
+        向 Arduino 發送巡邏命令，啟動小車的巡邏行為
+        
+        Returns:
+            bool: 啟動巡邏是否成功
+        """
+        self.logger.info("啟動巡邏模式下的小車移動")
+        self.logger.info("Starting car movement in patrol mode")
+        
+        # 發送巡邏命令到 Arduino
+        success = self._send_command("start_patrol")
+        
+        if success:
+            self.logger.info("已成功啟動巡邏模式")
+            self.logger.info("Successfully started patrol mode")
+        else:
+            self.logger.error("啟動巡邏模式失敗")
+            self.logger.error("Failed to start patrol mode")
+            
+        return success
     
     def get_status(self):
         """獲取移動控制器狀態

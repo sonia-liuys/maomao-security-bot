@@ -342,6 +342,50 @@ class RobotController:
             else:
                 return {"success": False, "message": "Failed to deactivate laser", "message_cht": "關閉雷射失敗"}
         
+        elif cmd_type == "raise_arms":
+            # 處理舉起手臂命令
+            # Handle raise arms command
+            self.logger.info("收到舉起手臂命令")
+            self.logger.info("Received raise arms command")
+            
+            # 調用伺服馬達控制器的舉起手臂方法
+            self.servo_controller.raise_arms()
+            
+            return {"success": True, "message": "Arms raised", "message_cht": "手臂已舉起"}
+            
+        elif cmd_type == "lower_arms":
+            # 處理放下手臂命令
+            # Handle lower arms command
+            self.logger.info("收到放下手臂命令")
+            self.logger.info("Received lower arms command")
+            
+            # 調用伺服馬達控制器的放下手臂方法
+            self.servo_controller.lower_arms()
+            
+            return {"success": True, "message": "Arms lowered", "message_cht": "手臂已放下"}
+            
+        elif cmd_type == "open_eyelids":
+            # 處理睜開眼睛命令
+            # Handle open eyelids command
+            self.logger.info("收到睜開眼睛命令")
+            self.logger.info("Received open eyelids command")
+            
+            # 調用伺服馬達控制器的睜開眼睛方法
+            self.servo_controller.open_eyelids()
+            
+            return {"success": True, "message": "Eyelids opened", "message_cht": "眼睛已睜開"}
+            
+        elif cmd_type == "close_eyelids":
+            # 處理閉上眼睛命令
+            # Handle close eyelids command
+            self.logger.info("收到閉上眼睛命令")
+            self.logger.info("Received close eyelids command")
+            
+            # 調用伺服馬達控制器的閉上眼睛方法
+            self.servo_controller.close_eyelids()
+            
+            return {"success": True, "message": "Eyelids closed", "message_cht": "眼睛已閉上"}
+        
         else:
             return {"success": False, "message": "未知命令", "message_cht": "未知命令"}
     

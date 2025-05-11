@@ -140,7 +140,8 @@ class WebSocketServer:
         self.logger.info("WebSocket server stopped")
     
     def _run_server(self):
-        """運行WebSocket服務器的主循環"""
+        """運行WebSocket服務器的主循環
+        Run the main loop of the WebSocket server"""
         self.logger.info(f"啟動WebSocket服務器在端口 {self.port}")
         self.logger.info(f"Starting WebSocket server on port {self.port}")
         
@@ -149,18 +150,42 @@ class WebSocketServer:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
+        # 定義啟動服務器的異步函數
+        # Define async function to start server
         async def start_server_async():
-            return await websockets.serve(self._handle_client, "0.0.0.0", self.port)
+            try:
+                # 嘗試在指定端口啟動服務器
+                # Try to start server on specified port
+                return await websockets.serve(self._handle_client, "0.0.0.0", self.port)
+            except OSError as e:
+                # 端口可能被佔用，記錄錯誤並嘗試使用備用端口
+                # Port might be in use, log error and try fallback port
+                self.logger.error(f"無法在端口 {self.port} 啟動WebSocket服務器: {e}")
+                self.logger.error(f"Failed to start WebSocket server on port {self.port}: {e}")
+                
+                # 嘗試使用備用端口 (原端口+1)
+                # Try fallback port (original port + 1)
+                fallback_port = self.port + 1
+                self.logger.info(f"嘗試使用備用端口 {fallback_port}")
+                self.logger.info(f"Trying fallback port {fallback_port}")
+                self.port = fallback_port  # 更新端口號
+                return await websockets.serve(self._handle_client, "0.0.0.0", fallback_port)
         
-        # 啟動服務器
-        # Start server
-        self.server = loop.run_until_complete(start_server_async())
-        self.logger.info("WebSocket服務器已啟動，等待連接...")
-        self.logger.info("WebSocket server started, waiting for connections...")
-        
-        # 運行事件循環
-        # Run event loop
-        loop.run_forever()
+        try:
+            # 啟動服務器
+            # Start server
+            self.server = loop.run_until_complete(start_server_async())
+            self.logger.info(f"WebSocket服務器已啟動在端口 {self.port}，等待連接...")
+            self.logger.info(f"WebSocket server started on port {self.port}, waiting for connections...")
+            
+            # 運行事件循環
+            # Run event loop
+            loop.run_forever()
+        except Exception as e:
+            self.logger.error(f"啟動WebSocket服務器時發生錯誤: {e}")
+            self.logger.error(f"Error occurred while starting WebSocket server: {e}")
+            # 設置運行標誌為False
+            self.running = False
     
     def _stop_server(self):
         """停止WebSocket服務器"""

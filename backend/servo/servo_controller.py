@@ -76,9 +76,9 @@ class ServoController:
     # Eye color mapping (adjusted for GRB pixel order)
     EYE_COLORS = {
         "green": (0, 255, 0),     # GRB for Green (G=255)
-        "red": (0, 0, 255),       # GRB for Red (R=255)
-        "yellow": (0, 255, 255),  # GRB for Yellow (R=255, G=255)
-        "blue": (255, 0, 0),      # GRB for Blue (B=255)
+        "red": (255, 0, 0),       # GRB for Red (R=255)
+        "yellow": (255, 255, 0),  # GRB for Yellow (R=255, G=255)
+        "blue": (0, 0, 255),      # GRB for Blue (B=255)
         "white": (255, 255, 255), # GRB for White (R=255, G=255, B=255)
         "off": (0, 0, 0)          # GRB for Off (all 0)
     }
@@ -454,15 +454,26 @@ class ServoController:
             face_y (float): 人臉Y座標 (0-1)
         """
         # 將0-1的座標映射到伺服馬達角度
-        # 眼睛方向: 0->60, 0.5->90, 1->120
-        eye_angle = 60 + face_x * 60
+        # 眼睛方向: 左最多60度，右最多120度
+        # Eye direction: leftmost 60 degrees, rightmost 120 degrees
+        eye_angle = 60 + face_x * 60  # 0->60, 0.5->90, 1->120
         
         # 頸部方向: 0->70, 0.5->90, 1->110
+        # Neck direction: 0->70, 0.5->90, 1->110
         neck_angle = 70 + face_x * 40
         
+        # 確保角度在有效範圍內
+        # Ensure angles are within valid range
+        eye_angle = max(60, min(120, eye_angle))  # Clamp between 60-120
+        neck_angle = max(70, min(110, neck_angle))  # Clamp between 70-110
+        
         # 平滑設置眼睛和頸部位置
+        # Smoothly set eye and neck positions
         self.move_servo_smooth(self.SERVO_EYE, eye_angle, step_size=2, delay=0.01)
         self.move_servo_smooth(self.SERVO_NECK, neck_angle, step_size=2, delay=0.01)
+        
+        self.logger.debug(f"跟隨人臉: 位置({face_x:.2f}, {face_y:.2f}) -> 眼睛角度: {eye_angle:.1f}, 頸部角度: {neck_angle:.1f}")
+        self.logger.debug(f"Following face: position({face_x:.2f}, {face_y:.2f}) -> eye angle: {eye_angle:.1f}, neck angle: {neck_angle:.1f}")
     
 
     

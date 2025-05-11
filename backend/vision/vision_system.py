@@ -397,7 +397,7 @@ class VisionSystem:
         """Main loop for processing camera frames
 處理攝像頭幀的主循環"""
         last_classification_time = 0
-        classification_interval = 1.0  # 每秒分類一次
+        classification_interval = 3.0  # 每3秒分類一次
         
         while self.running:
             current_time = time.time()
@@ -687,45 +687,4 @@ class VisionSystem:
         with self.lock:
             return self.latest_data["timestamp"]
     
-    def get_status(self):
-        """Get vision system status
-        獲取視覺系統狀態
-        
-        Returns:
-            dict: Vision system status
-            dict: 視覺系統狀態
-        """
-        with self.lock:
-            latest_data = self.latest_data
-            # 首先記錄最新数据中的值
-            # First log the values in the latest data
-            self.logger.info(f"VisionSystem.get_status: latest_data = {latest_data}")
-            
-            # 初始化狀態字典
-            # Initialize status dictionary
-            status = {
-                "camera_active": self.camera is not None and self.camera.isOpened(),
-                "resolution": f"{self.frame_width}x{self.frame_height}",
-                "face_detected": latest_data["face_detected"],
-                "recognized_person": latest_data["recognized_person"],
-                "student_id_detected": latest_data["student_id_detected"],
-                "confidence": latest_data["confidence"]
-            }
-            
-            # 添加人臉座標
-            # Add face coordinates
-            if "face_x" in latest_data and "face_y" in latest_data:
-                try:
-                    status["face_x"] = latest_data["face_x"]
-                    status["face_y"] = latest_data["face_y"]
-                    self.logger.info(f"VisionSystem.get_status: 添加人臉座標到狀態中: x={status['face_x']:.2f}, y={status['face_y']:.2f}")
-                    self.logger.info(f"VisionSystem.get_status: Adding face coordinates to status: x={status['face_x']:.2f}, y={status['face_y']:.2f}")
-                except Exception as e:
-                    self.logger.error(f"VisionSystem.get_status: 提取人臉座標時出錯: {e}")
-                    self.logger.error(f"VisionSystem.get_status: Error extracting face coordinates: {e}")
-            else:
-                self.logger.warning("VisionSystem.get_status: latest_data 中沒有人臉座標信息")
-                self.logger.warning("VisionSystem.get_status: No face coordinates in latest_data")
-            
-            self.logger.info(f"VisionSystem.get_status: 返回狀態 = {status}")
-            return status
+    

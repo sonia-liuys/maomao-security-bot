@@ -168,8 +168,16 @@ class RobotController:
                 
         elif cmd_type == "move":
             direction = cmd_data.get("direction")
-            self.movement_controller.move(direction)
-            return {"success": True, "message": f"移動指令: {direction}"}
+            continuous = cmd_data.get("continuous", False)
+            
+            if continuous:
+                self.logger.info(f"連續移動指令: {direction}")
+                self.logger.info(f"Continuous movement command: {direction}")
+                self.movement_controller.start_continuous_movement(direction)
+                return {"success": True, "message": f"連續移動指令: {direction}", "message_cht": f"連續移動指令: {direction}"}
+            else:
+                self.movement_controller.move(direction)
+                return {"success": True, "message": f"移動指令: {direction}", "message_cht": f"移動指令: {direction}"}
             
         elif cmd_type == "servo":
             servo_id = cmd_data.get("id")
@@ -242,22 +250,100 @@ class RobotController:
             if self.mode_manager.current_mode != RobotMode.PATROL:
                 self.mode_manager.set_mode(RobotMode.PATROL)
             
+            # 設置巡邏模式為活動狀態
+            self.mode_manager.set_patrol_active(True)
+            
             # 使用移動控制器的 start_patrol 方法啟動巡邏
             self.logger.info("正在啟動巡邏模式下的小車移動...")
             self.logger.info("Starting car movement in patrol mode...")
-            success = self.movement_controller.start_patrol()
+            success = self.movement_controller.start_patrol() if hasattr(self.movement_controller, 'start_patrol') else True
             
             if success:
                 self.logger.info("巡邏模式已成功啟動")
                 self.logger.info("Patrol mode successfully started")
+                
+                # 廣播狀態更新
+                self.websocket_server.broadcast_status()
+                
                 return {"success": True, "message": "Patrol started", "message_cht": "巡邏已開始"}
             else:
                 self.logger.error("啟動巡邏模式失敗")
                 self.logger.error("Failed to start patrol mode")
                 return {"success": False, "message": "Failed to start patrol", "message_cht": "無法開始巡邏"}
             
+        elif cmd_type == "stop":
+            # 處理停止命令
+            # Handle stop command
+            self.logger.info("收到停止命令")
+            self.logger.info("Received stop command")
+            
+            # 調用移動控制器的停止方法
+            self.movement_controller.stop()
+            
+            return {"success": True, "message": "Movement stopped", "message_cht": "移動已停止"}
+            
+        elif cmd_type == "stop_patrol":
+            # 處理停止巡邏命令
+            # Handle stop patrol command
+            self.logger.info("收到停止巡邏命令")
+            self.logger.info("Received stop patrol command")
+            
+            # 調用移動控制器的停止方法來停止巡邏
+            self.movement_controller.stop()
+            
+            # 更新巡邏狀態
+            self.mode_manager.set_patrol_active(False)
+            
+            # 廣播狀態更新
+            self.websocket_server.broadcast_status()
+            
+            return {"success": True, "message": "Patrol stopped", "message_cht": "巡邏已停止"}
+            
+        elif cmd_type == "set_eye_color":
+            # 處理設置眼睛顏色命令
+            # Handle set eye color command
+            color = cmd_data.get("color")
+            self.logger.info(f"收到設置眼睛顏色命令: {color}")
+            self.logger.info(f"Received set eye color command: {color}")
+            
+            # 調用伺服馬達控制器的設置眼睛顏色方法
+            success = self.servo_controller.set_eye_color(color)
+            
+            if success:
+                return {"success": True, "message": f"Eye color set to {color}", "message_cht": f"眼睛顏色已設置為{color}"}
+            else:
+                return {"success": False, "message": f"Failed to set eye color to {color}", "message_cht": f"設置眼睛顏色為{color}失敗"}
+                
+        elif cmd_type == "activate_laser":
+            # 處理啟動雷射命令
+            # Handle activate laser command
+            self.logger.info("收到啟動雷射命令")
+            self.logger.info("Received activate laser command")
+            
+            # 調用伺服馬達控制器的啟動雷射方法
+            success = self.servo_controller.activate_laser()
+            
+            if success:
+                return {"success": True, "message": "Laser activated", "message_cht": "雷射已啟動"}
+            else:
+                return {"success": False, "message": "Failed to activate laser", "message_cht": "啟動雷射失敗"}
+                
+        elif cmd_type == "deactivate_laser":
+            # 處理關閉雷射命令
+            # Handle deactivate laser command
+            self.logger.info("收到關閉雷射命令")
+            self.logger.info("Received deactivate laser command")
+            
+            # 調用伺服馬達控制器的關閉雷射方法
+            success = self.servo_controller.deactivate_laser()
+            
+            if success:
+                return {"success": True, "message": "Laser deactivated", "message_cht": "雷射已關閉"}
+            else:
+                return {"success": False, "message": "Failed to deactivate laser", "message_cht": "關閉雷射失敗"}
+        
         else:
-            return {"success": False, "message": "未知命令"}
+            return {"success": False, "message": "未知命令", "message_cht": "未知命令"}
     
     def get_status(self):
         """獲取機器人當前狀態
@@ -274,6 +360,7 @@ class RobotController:
         return {
             "timestamp": self.vision_system.get_timestamp(),
             "mode": mode_status["current_mode"],
+            "patrol_active": mode_status.get("patrol_active", False),  # 添加巡邏模式活動狀態
             "vision": {
                 "face_detected": vision_status["face_detected"],
                 "recognized_person": vision_status["recognized_person"],

@@ -68,18 +68,23 @@ class MovementController:
     def _init_hardware(self):
         """初始化硬體連接
         
-        注意：這是一個模擬實現，實際部署時需要使用真實的硬體控制代碼
+        嘗試連接到Arduino的串口
         """
         self.logger.info("初始化移動控制器硬體連接...")
         
         try:
-            # 實際部署時，這裡會打開與Arduino的串口連接
-            # self.serial_conn = serial.Serial(self.serial_port, self.baud_rate, timeout=1.0)
-            # 模擬初始化
-            time.sleep(0.5)
-            self.logger.info("移動控制器硬體連接已就緒")
+            # 打開與Arduino的串口連接
+            self.serial_conn = serial.Serial(self.serial_port, self.baud_rate, timeout=1.0)
+            time.sleep(0.5)  # 等待串口初始化
+            self.logger.info(f"移動控制器硬體連接已就緒，串口: {self.serial_port}, 波特率: {self.baud_rate}")
+            self.logger.info(f"Movement controller hardware connection ready, serial port: {self.serial_port}, baud rate: {self.baud_rate}")
         except Exception as e:
             self.logger.error(f"無法初始化移動控制器硬體: {e}")
+            self.logger.error(f"Failed to initialize movement controller hardware: {e}")
+            # 如果無法連接到串口，則使用模擬模式
+            self.serial_conn = None
+            self.logger.warning("使用模擬模式運行移動控制器")
+            self.logger.warning("Running movement controller in simulation mode")
     
     def start(self):
         """啟動移動控制器"""
@@ -225,37 +230,34 @@ class MovementController:
         """
         if not params:
             params = {}
-            
-        # 構建命令數據
-        cmd_data = {
-            "command": command,
-            "params": params
-        }
         
-        # 序列化為JSON
-        cmd_json = json.dumps(cmd_data)
+        # 根據指定的命令格式轉換命令
+        arduino_command = command
         
-        self.logger.info(f"發送命令到Arduino: {cmd_json}")
-        self.logger.info(f"Sending command to Arduino: {cmd_json}")
+        # 將命令轉換為 Arduino 可以識別的格式
+        if command == self.DIRECTION_LEFT:
+            arduino_command = "move_left"
+        elif command == self.DIRECTION_RIGHT:
+            arduino_command = "move_right"
+        
+        # 將命令直接發送到 Arduino
+        self.logger.info(f"發送命令到Arduino: {arduino_command}")
+        self.logger.info(f"Sending command to Arduino: {arduino_command}")
         
         # 實際發送命令
         try:
             if self.serial_conn and self.serial_conn.is_open:
                 # 發送命令到Arduino
-                self.serial_conn.write((cmd_json + '\n').encode())
-                self.logger.info(f"命令 '{command}' 已發送到Arduino")
-                self.logger.info(f"Command '{command}' sent to Arduino")
+                self.serial_conn.write(f"{arduino_command}\n".encode())
+                self.logger.info(f"命令 '{arduino_command}' 已發送到Arduino")
+                self.logger.info(f"Command '{arduino_command}' sent to Arduino")
                 return True
             else:
                 # 如果在測試模式下，模擬發送成功
                 self.logger.warning("串口未開啟，模擬發送命令")
                 self.logger.warning("Serial port not open, simulating command send")
-                
-                # 如果是 start_patrol 命令，特別記錄
-                if command == "start_patrol":
-                    self.logger.info("模擬發送 'start_patrol' 命令到Arduino")
-                    self.logger.info("Simulating sending 'start_patrol' command to Arduino")
-                
+                self.logger.info(f"模擬發送 '{arduino_command}' 命令到Arduino")
+                self.logger.info(f"Simulating sending '{arduino_command}' command to Arduino")
                 return True  # 模擬模式下返回成功
                 
         except Exception as e:
@@ -324,6 +326,36 @@ class MovementController:
             self.logger.error("Failed to start patrol mode")
             
         return success
+        
+    def start_continuous_movement(self, direction):
+        """開始連續移動
+        
+        Args:
+            direction (str): 移動方向 ("forward", "backward", "left", "right")
+            
+        Returns:
+            bool: 操作是否成功
+        """
+        valid_directions = [
+            self.DIRECTION_FORWARD,
+            self.DIRECTION_BACKWARD,
+            self.DIRECTION_LEFT,
+            self.DIRECTION_RIGHT
+        ]
+        
+        if direction not in valid_directions:
+            self.logger.error(f"無效的移動方向: {direction}")
+            self.logger.error(f"Invalid movement direction: {direction}")
+            return False
+            
+        self.logger.info(f"開始連續移動: {direction}")
+        self.logger.info(f"Starting continuous movement: {direction}")
+        
+        with self.lock:
+            self.current_direction = direction
+            
+        # 發送移動命令到Arduino
+        return self._send_command(direction)
     
     def get_status(self):
         """獲取移動控制器狀態

@@ -19,7 +19,11 @@ import {
   EyeOff,
   Clock,
   Scan,
-  User
+  User,
+  Square,
+  Zap,
+  ZapOff,
+  Palette
 } from "lucide-react"
 import Navigation from "@/components/navigation"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
@@ -57,6 +61,10 @@ export default function RemoteMode() {
   const [alarmActive, setAlarmActive] = useState(false)
   const [statusMessage, setStatusMessage] = useState("Ready to assist")
   const [faceDetectionActive, setFaceDetectionActive] = useState(false)
+  const [laserActive, setLaserActive] = useState(false)
+  const [currentEyeColor, setCurrentEyeColor] = useState("green")
+  const [isMoving, setIsMoving] = useState(false)
+  const [movementDirection, setMovementDirection] = useState("") // "forward", "backward", "left", "right"
   const canvasRef = useRef<HTMLCanvasElement>(null)
   
   const { isConnected, setRobotMode, sendCommand, lastMessage, robotStatus } = useRobotConnection()
@@ -533,6 +541,78 @@ export default function RemoteMode() {
     setStatusMessage("Powering off...")
     // In a real app, this would trigger a shutdown sequence
   }
+  
+  // 雷射控制
+  const toggleLaser = () => {
+    const newLaserState = !laserActive;
+    setLaserActive(newLaserState);
+    
+    // 發送命令到後端
+    sendCommand({
+      type: newLaserState ? 'activate_laser' : 'deactivate_laser',
+      data: {}
+    });
+    
+    setStatusMessage(newLaserState ? "雷射已啟動" : "雷射已關閉");
+  }
+  
+  // 眼睛顏色控制
+  const changeEyeColor = (color: string) => {
+    setCurrentEyeColor(color);
+    
+    // 發送命令到後端
+    sendCommand({
+      type: 'set_eye_color',
+      data: {
+        color: color
+      }
+    });
+    
+    setStatusMessage(`眼睛顏色已設置為${color}`);
+  }
+  
+  // 連續移動控制
+  const startMoving = (direction: string) => {
+    setIsMoving(true);
+    setMovementDirection(direction);
+    
+    // 發送移動命令到後端
+    sendCommand({
+      type: 'move',
+      data: {
+        direction: direction,
+        continuous: true
+      }
+    });
+    
+    setStatusMessage(`正在${getDirectionText(direction)}`);
+  }
+  
+  const stopMoving = () => {
+    if (isMoving) {
+      setIsMoving(false);
+      setMovementDirection("");
+      
+      // 發送停止命令到後端
+      sendCommand({
+        type: 'stop',
+        data: {}
+      });
+      
+      setStatusMessage("已停止移動");
+    }
+  }
+  
+  // 獲取方向文字描述
+  const getDirectionText = (direction: string) => {
+    switch(direction) {
+      case 'forward': return '前進';
+      case 'backward': return '後退';
+      case 'left': return '左轉';
+      case 'right': return '右轉';
+      default: return '移動';
+    }
+  }
 
   return (
     <main className="flex min-h-screen flex-col items-center p-4 bg-[#050a10] text-white grid-bg">
@@ -587,47 +667,50 @@ export default function RemoteMode() {
         </div>
 
         {/* Robot control buttons */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          {/* Original controls (smaller) */}
+          <div className="grid grid-cols-3 gap-1">
             <Button
               className="bg-[#0a1520] hover:bg-[#152535] text-[#50bedc] control-button p-1"
               onClick={handleRaiseHand}
+              size="sm"
             >
               <div className="flex flex-col items-center">
-                <HandMetal className="h-4 w-4 mb-1" />
-                <span className="text-xs">Raise</span>
+                <HandMetal className="h-3 w-3 mb-1" />
+                <span className="text-[10px]">Raise</span>
               </div>
             </Button>
 
             <Button
               className="bg-[#0a1520] hover:bg-[#152535] text-[#50bedc] control-button p-1"
               onClick={handleLowerHand}
+              size="sm"
             >
               <div className="flex flex-col items-center">
-                <ArrowDown className="h-4 w-4 mb-1" />
-                <span className="text-xs">Lower</span>
+                <ArrowDown className="h-3 w-3 mb-1" />
+                <span className="text-[10px]">Lower</span>
               </div>
             </Button>
 
             <Button
               className="bg-[#0a1520] hover:bg-[#152535] text-[#50bedc] control-button p-1"
               onClick={handleOpenEyes}
+              size="sm"
             >
               <div className="flex flex-col items-center">
-                <Eye className="h-4 w-4 mb-1" />
-                <span className="text-xs">Open</span>
+                <Eye className="h-3 w-3 mb-1" />
+                <span className="text-[10px]">Open</span>
               </div>
             </Button>
-          </div>
 
-          <div className="grid grid-cols-3 gap-2">
             <Button
               className="bg-[#0a1520] hover:bg-[#152535] text-[#50bedc] control-button p-1"
               onClick={handleCloseEyes}
+              size="sm"
             >
               <div className="flex flex-col items-center">
-                <EyeOff className="h-4 w-4 mb-1" />
-                <span className="text-xs">Close</span>
+                <EyeOff className="h-3 w-3 mb-1" />
+                <span className="text-[10px]">Close</span>
               </div>
             </Button>
 
@@ -635,22 +718,100 @@ export default function RemoteMode() {
               className={`${alarmActive ? 'bg-[#251520] hover:bg-[#352530] text-red-400' : 'bg-[#0a1520] hover:bg-[#152535] text-[#50bedc]'} control-button p-1`}
               onClick={handleClearAlarm}
               disabled={!alarmActive}
+              size="sm"
             >
               <div className="flex flex-col items-center">
-                <AlertTriangle className={`h-4 w-4 mb-1 ${alarmActive ? 'animate-pulse' : ''}`} />
-                <span className="text-xs">{alarmActive ? '解除警報' : '無警報'}</span>
+                <AlertTriangle className={`h-3 w-3 mb-1 ${alarmActive ? 'animate-pulse' : ''}`} />
+                <span className="text-[10px]">{alarmActive ? '解除警報' : '無警報'}</span>
               </div>
             </Button>
 
             <Button
               className="bg-[#1a1520] hover:bg-[#251520] text-red-400 border-red-500/30 control-button p-1"
               onClick={handlePowerOff}
+              size="sm"
             >
               <div className="flex flex-col items-center">
-                <Power className="h-4 w-4 mb-1" />
-                <span className="text-xs">Power</span>
+                <Power className="h-3 w-3 mb-1" />
+                <span className="text-[10px]">Power</span>
               </div>
             </Button>
+          </div>
+
+          {/* Eye color controls */}
+          <div className="flex flex-col gap-2">
+            <div className="text-[#50bedc] text-xs mb-1 text-center">眼睛顏色</div>
+            <div className="grid grid-cols-4 gap-2">
+              <Button
+                className={`${currentEyeColor === 'red' ? 'bg-red-700' : 'bg-red-600'} hover:bg-red-700 text-white p-1 h-8`}
+                onClick={() => changeEyeColor('red')}
+              >
+                <div className="flex items-center justify-center w-full">
+                  <div className="h-3 w-3 rounded-full bg-red-400 mr-1"></div>
+                  <span className="text-xs">紅</span>
+                </div>
+              </Button>
+
+              <Button
+                className={`${currentEyeColor === 'yellow' ? 'bg-yellow-700' : 'bg-yellow-600'} hover:bg-yellow-700 text-white p-1 h-8`}
+                onClick={() => changeEyeColor('yellow')}
+              >
+                <div className="flex items-center justify-center w-full">
+                  <div className="h-3 w-3 rounded-full bg-yellow-400 mr-1"></div>
+                  <span className="text-xs">黃</span>
+                </div>
+              </Button>
+
+              <Button
+                className={`${currentEyeColor === 'blue' ? 'bg-blue-700' : 'bg-blue-600'} hover:bg-blue-700 text-white p-1 h-8`}
+                onClick={() => changeEyeColor('blue')}
+              >
+                <div className="flex items-center justify-center w-full">
+                  <div className="h-3 w-3 rounded-full bg-blue-400 mr-1"></div>
+                  <span className="text-xs">藍</span>
+                </div>
+              </Button>
+
+              <Button
+                className={`${currentEyeColor === 'green' ? 'bg-green-700' : 'bg-green-600'} hover:bg-green-700 text-white p-1 h-8`}
+                onClick={() => changeEyeColor('green')}
+              >
+                <div className="flex items-center justify-center w-full">
+                  <div className="h-3 w-3 rounded-full bg-green-400 mr-1"></div>
+                  <span className="text-xs">綠</span>
+                </div>
+              </Button>
+            </div>
+
+            {/* Laser control */}
+            <div className="mt-2">
+              <Button
+                className={`${laserActive ? 'bg-red-700 hover:bg-red-800' : 'bg-[#0a1520] hover:bg-[#152535]'} text-white p-1 w-full`}
+                onClick={toggleLaser}
+              >
+                <div className="flex items-center justify-center w-full">
+                  {laserActive ? (
+                    <>
+                      <Zap className="h-4 w-4 mr-2 text-yellow-400" />
+                      <span className="text-xs">關閉雷射</span>
+                    </>
+                  ) : (
+                    <>
+                      <ZapOff className="h-4 w-4 mr-2" />
+                      <span className="text-xs">開啟雷射</span>
+                    </>
+                  )}
+                </div>
+              </Button>
+            </div>
+          </div>
+
+          {/* Status display */}
+          <div className="flex flex-col justify-center items-center">
+            <div className="text-[#50bedc] text-xs mb-1">狀態</div>
+            <div className="bg-[#0a1520] border border-[#50bedc]/30 rounded p-2 w-full h-full flex items-center justify-center">
+              <p className="text-[#50bedc] text-xs text-center">{statusMessage}</p>
+            </div>
           </div>
         </div>
 
@@ -659,21 +820,39 @@ export default function RemoteMode() {
           <div className="col-span-3">
             <div className="grid grid-cols-3 gap-2">
               <div></div>
-              <Button className="bg-[#0a1520] hover:bg-[#152535] text-[#50bedc] control-button">
+              <Button 
+                className={`${movementDirection === 'forward' ? 'bg-[#152535]' : 'bg-[#0a1520]'} hover:bg-[#152535] text-[#50bedc] control-button`}
+                onClick={() => startMoving('forward')}
+              >
                 <ArrowUp className="h-5 w-5" />
               </Button>
               <div></div>
 
-              <Button className="bg-[#0a1520] hover:bg-[#152535] text-[#50bedc] control-button">
+              <Button 
+                className={`${movementDirection === 'left' ? 'bg-[#152535]' : 'bg-[#0a1520]'} hover:bg-[#152535] text-[#50bedc] control-button`}
+                onClick={() => startMoving('left')}
+              >
                 <ArrowLeft className="h-5 w-5" />
               </Button>
-              <div className="flex items-center justify-center text-[#50bedc]/70 text-xs">MOVE</div>
-              <Button className="bg-[#0a1520] hover:bg-[#152535] text-[#50bedc] control-button">
+              <Button 
+                className={`${isMoving ? 'bg-red-700 hover:bg-red-800 text-white' : 'bg-[#0a1520] hover:bg-[#152535] text-[#50bedc]'} control-button`}
+                onClick={stopMoving}
+              >
+                <Square className="h-5 w-5" />
+                <span className="sr-only">停止</span>
+              </Button>
+              <Button 
+                className={`${movementDirection === 'right' ? 'bg-[#152535]' : 'bg-[#0a1520]'} hover:bg-[#152535] text-[#50bedc] control-button`}
+                onClick={() => startMoving('right')}
+              >
                 <ArrowRight className="h-5 w-5" />
               </Button>
 
               <div></div>
-              <Button className="bg-[#0a1520] hover:bg-[#152535] text-[#50bedc] control-button">
+              <Button 
+                className={`${movementDirection === 'backward' ? 'bg-[#152535]' : 'bg-[#0a1520]'} hover:bg-[#152535] text-[#50bedc] control-button`}
+                onClick={() => startMoving('backward')}
+              >
                 <ArrowDown className="h-5 w-5" />
               </Button>
               <div></div>

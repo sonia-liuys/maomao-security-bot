@@ -205,7 +205,7 @@ class RobotArmDemo:
             # 右手臂上揮
             self.servo_controller.move_servo_smooth(
                 self.servo_controller.SERVO_RIGHT_ARM,
-                150,
+                30,
                 step_size=5,
                 delay=0.02
             )
@@ -214,7 +214,7 @@ class RobotArmDemo:
             # 右手臂下揮
             self.servo_controller.move_servo_smooth(
                 self.servo_controller.SERVO_RIGHT_ARM,
-                30,
+                150,
                 step_size=5,
                 delay=0.02
             )
@@ -233,7 +233,7 @@ class RobotArmDemo:
             # 左手臂上揮
             self.servo_controller.move_servo_smooth(
                 self.servo_controller.SERVO_LEFT_ARM,
-                150,
+                30,
                 step_size=5,
                 delay=0.02
             )
@@ -242,7 +242,7 @@ class RobotArmDemo:
             # 左手臂下揮
             self.servo_controller.move_servo_smooth(
                 self.servo_controller.SERVO_LEFT_ARM,
-                30,
+                150,
                 step_size=5,
                 delay=0.02
             )

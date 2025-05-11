@@ -87,22 +87,34 @@ class MovementController:
             self.logger.warning("Running movement controller in simulation mode")
     
     def start(self):
-        """啟動移動控制器"""
+        """啟動移動控制器
+        Start movement controller
+        """
         if self.running:
             return
             
         self.logger.info("啟動移動控制器...")
+        self.logger.info("Starting movement controller...")
         self.running = True
         
+        # 確保方形路徑模式關閉
+        # Ensure square path mode is disabled
+        with self.lock:
+            self.square_path_active = False
+            self.square_path_step = 0
+        
         # 停止所有移動
+        # Stop all movements
         self.stop()
         
         # 啟動處理線程
+        # Start processing thread
         self.thread = threading.Thread(target=self._update_loop)
         self.thread.daemon = True
         self.thread.start()
         
         self.logger.info("移動控制器已啟動")
+        self.logger.info("Movement controller started")
     
     def stop(self):
         """停止所有移動"""
@@ -235,10 +247,24 @@ class MovementController:
         arduino_command = command
         
         # 將命令轉換為 Arduino 可以識別的格式
-        if command == self.DIRECTION_LEFT:
+        # Convert commands to Arduino-recognizable format
+        if command == self.DIRECTION_FORWARD:
+            arduino_command = "move_forward"
+        elif command == self.DIRECTION_BACKWARD:
+            arduino_command = "move_backward"
+        elif command == self.DIRECTION_LEFT:
             arduino_command = "move_left"
         elif command == self.DIRECTION_RIGHT:
             arduino_command = "move_right"
+        elif command == self.DIRECTION_STOP:
+            arduino_command = "stop"
+        elif command == "start_patrol":
+            arduino_command = "start_patrol"
+            # 設置方形路徑模式為啟動狀態
+            # Set square path mode to active state
+            with self.lock:
+                self.square_path_active = True
+                self.square_path_step = 0
         
         # 將命令直接發送到 Arduino
         self.logger.info(f"發送命令到Arduino: {arduino_command}")

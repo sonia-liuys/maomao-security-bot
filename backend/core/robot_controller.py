@@ -182,8 +182,28 @@ class RobotController:
         elif cmd_type == "servo":
             servo_id = cmd_data.get("id")
             position = cmd_data.get("position")
-            self.servo_controller.set_position(servo_id, position)
-            return {"success": True, "message": f"伺服馬達 {servo_id} 設置為 {position}"}
+            
+            # 處理高級伺服馬達命令
+            if servo_id == "arms" and position == "up":
+                self.logger.info("舉起手臂命令")
+                self.servo_controller.raise_arms()
+                return {"success": True, "message": "手臂已舉起", "message_cht": "手臂已舉起"}
+            elif servo_id == "arms" and position == "down":
+                self.logger.info("放下手臂命令")
+                self.servo_controller.lower_arms()
+                return {"success": True, "message": "手臂已放下", "message_cht": "手臂已放下"}
+            elif servo_id == "eyes" and position == "open":
+                self.logger.info("睜開眼睛命令")
+                self.servo_controller.open_eyelids()
+                return {"success": True, "message": "眼睛已睜開", "message_cht": "眼睛已睜開"}
+            elif servo_id == "eyes" and position == "closed":
+                self.logger.info("閉上眼睛命令")
+                self.servo_controller.close_eyelids()
+                return {"success": True, "message": "眼睛已閉上", "message_cht": "眼睛已閉上"}
+            else:
+                # 直接設置伺服馬達位置
+                self.servo_controller.set_position(servo_id, position)
+                return {"success": True, "message": f"伺服馬達 {servo_id} 設置為 {position}", "message_cht": f"伺服馬達 {servo_id} 設置為 {position}"}
             
         elif cmd_type == "reset":
             self.reset()
@@ -206,6 +226,26 @@ class RobotController:
             
             return {"success": True, "message": "Alarm cleared", "message_cht": "警報已解除"}
         
+        elif cmd_type == "patrol":
+            # 處理巡邏命令
+            # Handle patrol command
+            patrol_action = cmd_data.get("action", "")
+            self.logger.info(f"收到巡邏命令: {patrol_action}")
+            self.logger.info(f"Received patrol command: {patrol_action}")
+            
+            if patrol_action == "start":
+                # 發送開始巡邏命令到移動控制器
+                # Send start patrol command to movement controller
+                self.movement_controller._send_command("start_patrol")
+                return {"success": True, "message": "Started patrol mode", "message_cht": "已開始巡邏模式"}
+            elif patrol_action == "stop":
+                # 停止所有移動
+                # Stop all movements
+                self.movement_controller.stop()
+                return {"success": True, "message": "Stopped patrol mode", "message_cht": "已停止巡邏模式"}
+            else:
+                return {"success": False, "message": "Invalid patrol action", "message_cht": "無效的巡邏動作"}
+                
         elif cmd_type == "start_video_stream":
             # 處理啟動視頻流命令
             # Handle start video stream command

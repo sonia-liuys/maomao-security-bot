@@ -14,7 +14,8 @@ import {
   Maximize,
   Minimize,
   RotateCw,
-  HandMetal,
+  ThumbsUp,
+  ThumbsDown,
   Eye,
   EyeOff,
   Square,
@@ -55,6 +56,7 @@ export default function RemoteMode() {
   const [statusMessage, setStatusMessage] = useState("Ready to assist")
   const [faceDetectionActive, setFaceDetectionActive] = useState(false)
   const [laserActive, setLaserActive] = useState(false)
+  const [patrolActive, setPatrolActive] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   
   const { isConnected, setRobotMode, sendCommand, lastMessage, robotStatus } = useRobotConnection()
@@ -255,6 +257,18 @@ export default function RemoteMode() {
       data: {}
     });
   };
+  
+  // 處理巡邏模式開關
+  const togglePatrol = () => {
+    const newState = !patrolActive;
+    setPatrolActive(newState);
+    sendCommand({
+      type: "patrol",
+      data: {
+        action: newState ? "start" : "stop"
+      }
+    });
+  };
 
   // 設置眼睛顏色
   const setEyeColor = (color: string) => {
@@ -392,6 +406,17 @@ export default function RemoteMode() {
                 {laserActive ? '關閉雷射' : '開啟雷射'}
               </Button>
             </div>
+            
+            {/* 巡邏模式開關 */}
+            <div className="mb-2">
+              <Button 
+                size="sm"
+                className={`w-full h-8 ${patrolActive ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-[#0a1520] hover:bg-[#152535] text-[#50bedc]'}`}
+                onClick={togglePatrol}
+              >
+                {patrolActive ? '停止巡邏' : '開始巡邏'}
+              </Button>
+            </div>
 
             {/* 其他功能按鈕 */}
             <div className="grid grid-cols-4 gap-1">
@@ -400,14 +425,14 @@ export default function RemoteMode() {
                 className="bg-[#0a1520] hover:bg-[#152535] text-[#50bedc] p-1 h-8"
                 onClick={handleRaiseHand}
               >
-                <HandMetal className="h-4 w-4" />
+                <ThumbsUp className="h-4 w-4" />
               </Button>
               <Button
                 size="sm"
                 className="bg-[#0a1520] hover:bg-[#152535] text-[#50bedc] p-1 h-8"
                 onClick={handleLowerHand}
               >
-                <ArrowDown className="h-4 w-4" />
+                <ThumbsDown className="h-4 w-4" />
               </Button>
               <Button
                 size="sm"

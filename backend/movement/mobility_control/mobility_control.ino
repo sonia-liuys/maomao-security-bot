@@ -95,16 +95,18 @@ void processSerialCommand() {
   if (serialCommand == "move_forward") {
     Serial.println("✅ 前進 (持續)");
     Serial.println("Forward (continuous)");
-    // 前進持續運動直到停止命令
-    setAllMotors(-180); // 注意這裡的負值可能需要根據你的電機接線方式調整
-    turnTimerActive = false; // 確保轉向定時器不會影響前進
+    // 使用PS2手柄的前進邏輯設置狀態變數
+    forward = 1; 
+    backward = turn_180 = turn_90_left = turn_90_right = 0;
+    turnTimerActive = false;
   } 
   else if (serialCommand == "move_backward") {
     Serial.println("✅ 後退 (持續)");
     Serial.println("Backward (continuous)");
-    // 後退持續運動直到停止命令
-    setAllMotors(180);
-    turnTimerActive = false; // 確保轉向定時器不會影響後退
+    // 使用PS2手柄的後退邏輯設置狀態變數
+    backward = 1;
+    forward = turn_180 = turn_90_left = turn_90_right = 0;
+    turnTimerActive = false;
   } 
   else if (serialCommand == "move_left") {
     Serial.println("✅ 左轉 (1秒)");
@@ -125,9 +127,11 @@ void processSerialCommand() {
   else if (serialCommand == "stop") {
     Serial.println("✅ 停止");
     Serial.println("Stop");
-    stopAllMotors();
+    // 重置所有狀態變數
+    forward = backward = turn_180 = turn_90_left = turn_90_right = 0;
     square_mode = 0; // 確保方形路徑模式關閉
     turnTimerActive = false; // 取消任何正在進行的轉向定時器
+    stopAllMotors(); // 立即停止馬達
   }
   else if (serialCommand == "start_patrol") {
     Serial.println("✅ 開始巡邏模式");

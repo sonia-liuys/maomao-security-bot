@@ -474,22 +474,21 @@ class VisionSystem:
             return
             
         # Process the largest face
-        # 處理最大的人臉
         largest_face = max(faces, key=lambda face: face[2] * face[3])
         x, y, w, h = largest_face
-        
         # Calculate face center position (normalized 0-1)
-        # 計算人臉中心位置（歸一化為0-1）
-        face_center_x = (x + w/2) / self.frame_width
-        face_center_y = (y + h/2) / self.frame_height
-        
+        frame_w = getattr(self, 'frame_width', frame.shape[1]) or frame.shape[1]
+        frame_h = getattr(self, 'frame_height', frame.shape[0]) or frame.shape[0]
+        if frame_w == 0: frame_w = frame.shape[1]
+        if frame_h == 0: frame_h = frame.shape[0]
+        face_center_x = (x + w/2) / frame_w
+        face_center_y = (y + h/2) / frame_h
+        face_center_x = max(0.0, min(1.0, face_center_x))
+        face_center_y = max(0.0, min(1.0, face_center_y))
         data["face_x"] = face_center_x
         data["face_y"] = face_center_y
-        
-        # Use the entire frame for classification instead of just the face
-        # 使用整張圖像進行分類，而不僅僅是人臉區域
-        self.logger.info("Performing classification on the entire frame")
-        self.logger.info("對整張圖像進行分類")
+        # English: Save normalized face center position to data dict for downstream tracking
+        # 中文：將正規化的人臉中心位置寫入 data 字典，供後續追蹤用
         
         # Resize frame to match model input size
         # 調整幀大小以匹配模型輸入大小

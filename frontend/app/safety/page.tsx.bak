@@ -1,0 +1,305 @@
+"use client"
+
+import { useState, useEffect, useRef } from "react"
+import { Card } from "@/components/ui/card"
+import Navigation from "@/components/navigation"
+import { Shield, Check, AlertTriangle } from "lucide-react"
+import useRobotConnection from "@/hooks/useRobotConnection"
+
+type Emotion = "happy" | "sad" | "neutral" | "excited" | "sleepy" | "suspicious" | "angry"
+
+export default function SafetyMode() {
+  // 狀態變量
+  const [currentEmotion, setCurrentEmotion] = useState<Emotion>("neutral")
+  const [securityLevel, setSecurityLevel] = useState("Normal")
+  const [threatDetected, setThreatDetected] = useState(false)
+  const [scanProgress, setScanProgress] = useState(0)
+  const [isScanning, setIsScanning] = useState(false)
+  const [scanComplete, setScanComplete] = useState(false)
+  const [statusMessage, setStatusMessage] = useState("Monitoring...")
+  const [recognizedPerson, setRecognizedPerson] = useState<string | null>(null)
+  const [eyeColor, setEyeColor] = useState<string>("green")
+  const [currentEmoji, setCurrentEmoji] = useState<string>("😐") // 默認表情符號
+  
+  // WebSocket 連接
+  const { isConnected, setRobotMode, lastMessage } = useRobotConnection()
+
+  // 使用ref追蹤是否已經發送過命令
+  const hasSentCommandRef = useRef(false)
+  
+  // 切換到監視模式
+  useEffect(() => {
+    // 如果連接已建立且尚未發送過命令
+    if (isConnected && !hasSentCommandRef.current) {
+      // 添加延遲，確保連接已完全建立
+      const timer = setTimeout(() => {
+        try {
+          setRobotMode("SURVEILLANCE");
+          console.log("切換到監視模式");
+          hasSentCommandRef.current = true;
+        } catch (error) {
+          console.error("設置模式失敗:", error);
+        }
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isConnected, setRobotMode])
+
+  // 處理從後端接收的消息
+  useEffect(() => {
+    if (!lastMessage) return;
+    
+    console.log('收到新消息:', lastMessage);
+    
+    // 處理識別結果消息
+    if (lastMessage && typeof lastMessage === 'object' && 'type' in lastMessage && lastMessage.type === 'recognition_result') {
+      const data = lastMessage.data as any;
+      console.log('識別結果:', data);
+      console.log('收到眼睛顏色:', data.eye_color);
+      console.log('收到表情符號:', data.emoji);
+      console.log('是否識別出已知人員:', data.recognized);
+      
+      // 更新眼睛顏色
+      if (data.eye_color) {
+        console.log('更新眼睛顏色為:', data.eye_color);
+        setEyeColor(data.eye_color);
+      }
+      
+      // 更新表情符號
+      if (data.emoji) {
+        console.log('更新表情符號為:', data.emoji);
+        setCurrentEmoji(data.emoji);
+      }
+      
+      // 更新其他狀態
+      if (data.recognized) {
+        setCurrentEmotion('happy');
+        setThreatDetected(false);
+        setSecurityLevel('Normal');
+        setRecognizedPerson(data.name);
+        setStatusMessage(`Recognized: ${data.name}`);
+      } else {
+        setCurrentEmotion('suspicious');
+        setThreatDetected(true);
+        setSecurityLevel('Alert');
+        setRecognizedPerson(null);
+        setStatusMessage(data.message || 'Unknown Person Detected!');
+      }
+    }
+  }, [lastMessage])
+
+  // 不再使用模擬的威脅檢測，而是依賴後端的實際檢測結果
+
+  // Simulate periodic security scans
+  useEffect(() => {
+    const startScan = () => {
+      setIsScanning(true)
+      setScanProgress(0)
+      setStatusMessage("Scanning...")
+
+      const scanInterval = setInterval(() => {
+        setScanProgress((prev) => {
+          if (prev >= 100) {
+            clearInterval(scanInterval)
+            setIsScanning(false)
+            setScanComplete(true)
+            setStatusMessage("Scan Complete")
+
+            setTimeout(() => {
+              setScanComplete(false)
+              setStatusMessage("Monitoring...")
+            }, 2000)
+
+            return 0
+          }
+          return prev + 1
+        })
+      }, 50)
+    }
+
+    // Start initial scan
+    startScan()
+
+    // Schedule periodic scans
+    const scanTimer = setInterval(() => {
+      startScan()
+    }, 30000)
+
+    return () => clearInterval(scanTimer)
+  }, [])
+
+  // 監聽 eyeColor 變化
+  useEffect(() => {
+    console.log('眼睛顏色狀態變化為:', eyeColor);
+  }, [eyeColor]);
+
+  // 當後端連接且尚未發送命令時，自動切換到監視模式
+  useEffect(() => {
+    if (isConnected && !hasSentCommandRef.current) {
+      console.log('已連接到機器人，切換到監視模式');
+      setRobotMode('surveillance');
+      hasSentCommandRef.current = true;
+    }
+  }, [isConnected, setRobotMode]);
+
+  // 模擬安全掃描的效果
+  useEffect(() => {
+    if (!isScanning) return;
+
+    const interval = setInterval(() => {
+      setScanProgress((prev) => {
+        if (prev >= 100) {
+          clearInterval(interval);
+          setIsScanning(false);
+          setScanComplete(true);
+          return 100;
+        }
+        return prev + 10;
+      });
+    }, 300);
+
+    return () => clearInterval(interval);
+  }, [isScanning]);
+
+  // Emoji mapping for emotional states
+  const emotionEmoji: Record<Emotion, string> = {
+    happy: "😄",
+    sad: "😢",
+    neutral: "😐",
+    excited: "😃",
+    sleepy: "😴",
+    suspicious: "😕",
+    angry: "😡"
+  }
+  
+  // 當前顯示的表情符號
+  const [currentEmoji, setCurrentEmoji] = useState<string>(emotionEmoji.neutral)
+
+  // Messages for each emotion
+  const messages = {
+    happy: "All systems operational. No threats detected.",
+    sad: "Minor system anomalies detected. Monitoring.",
+    neutral: "Standard security protocols active.",
+    excited: "Enhanced security mode active. Vigilance increased.",
+    sleepy: "Power conservation mode. Security at minimum levels.",
+  }
+
+  return (
+    <main className="flex min-h-screen flex-col items-center p-4 bg-[#050a10] text-white grid-bg">
+      <Navigation />
+      <Card className="w-full max-w-2xl bg-[#0a1520] border-[#50bedc]/30 p-6 flex flex-col mt-4 relative overflow-hidden">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center bg-[#0a1520] border border-[#50bedc]/30 rounded-full px-3 py-1">
+            <Shield className="h-4 w-4 mr-2 text-[#50bedc]" />
+            <span className="text-[#50bedc] text-sm">SURVEILLANCE MODE</span>
+          </div>
+
+          <div className="text-xl font-bold text-[#50bedc] glow-text">Security Protocol</div>
+
+          <div
+            className={`flex items-center bg-[#0a1520] border border-[#50bedc]/30 rounded-full px-3 py-1 ${
+              threatDetected ? "border-red-500/50 text-red-400" : ""
+            }`}
+          >
+            <span className="text-sm">{threatDetected ? "ALERT" : "SECURE"}</span>
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div className="mt-2 h-1 w-full bg-[#0a1520] overflow-hidden">
+          <div
+            className={`h-full ${threatDetected ? "bg-red-500" : "bg-[#50bedc]"}`}
+            style={{
+              width: `${isScanning ? scanProgress : 100}%`,
+              transition: "width 0.5s ease-out",
+            }}
+          ></div>
+        </div>
+
+        <div className="flex-grow flex flex-col items-center justify-center py-6">
+          {/* 表情符號和光環 */}
+          <div
+            className={`w-[200px] h-[200px] flex items-center justify-center rounded-full transition-all duration-1000 ${
+              threatDetected
+                ? "border-2 border-red-500/50 text-yellow-400"
+                : "border border-[#50bedc]/40 text-yellow-400"
+            }`}
+            style={{
+              background: "radial-gradient(circle, rgba(10,30,50,0.8) 0%, rgba(5,10,15,0.95) 70%)",
+              transition: "all 0.5s ease",
+              boxShadow: `0 0 15px 2px ${
+                eyeColor === "yellow" ? "rgba(255, 255, 0, 0.7)" : 
+                eyeColor === "red" ? "rgba(255, 0, 0, 0.7)" : 
+                eyeColor === "green" ? "rgba(0, 255, 0, 0.7)" : 
+                "rgba(80, 190, 220, 0.7)"
+              }`
+            }}
+          >
+            <div
+              className="text-[100px] animate-pulse"
+              style={{
+                filter: "drop-shadow(0 0 10px rgba(80, 190, 220, 0.8))",
+                animation: `${threatDetected ? "pulse 0.5s infinite" : "pulse 3s infinite"}`,
+              }}
+            >
+              {currentEmoji || emotionEmoji[currentEmotion]}
+            </div>
+          </div>
+
+          {/* Status message */}
+          <div className={`mt-8 text-2xl text-center glow-text ${threatDetected ? "text-red-400" : "text-[#50bedc]"}`}>
+            {statusMessage}
+          </div>
+
+          {/* Recognized person */}
+          {recognizedPerson && (
+            <div className="mt-4 text-xl text-center text-green-400">
+              {recognizedPerson}
+            </div>
+          )}
+
+          {/* Security level indicator */}
+          <div className="mt-8 flex items-center justify-center gap-2">
+            <div className="text-lg text-gray-400">Security Level:</div>
+            <div className={`font-bold ${securityLevel === "Alert" ? "text-red-400" : "text-green-400"}`}>
+              {securityLevel}
+            </div>
+            {securityLevel === "Alert" ? (
+              <AlertTriangle className="h-5 w-5 text-red-400" />
+            ) : (
+              <Check className="h-5 w-5 text-green-400" />
+            )}
+          </div>
+        </div>
+
+        {/* Status indicators */}
+        <div className="grid grid-cols-3 gap-4 w-full mt-4 mb-2">
+          <div className="bg-[#0a1520] border border-[#50bedc]/30 rounded-md p-3 text-center">
+            <div className="text-[#50bedc]/80 text-xs mb-2 uppercase tracking-wider">Perimeter</div>
+            <div className="flex items-center justify-center text-green-400 gap-1">
+              <Check className="h-4 w-4" />
+              <span>SECURE</span>
+            </div>
+          </div>
+
+          <div className="bg-[#0a1520] border border-[#50bedc]/30 rounded-md p-3 text-center">
+            <div className="text-[#50bedc]/80 text-xs mb-2 uppercase tracking-wider">Interior</div>
+            <div className="flex items-center justify-center text-green-400 gap-1">
+              <Check className="h-4 w-4" />
+              <span>SECURE</span>
+            </div>
+          </div>
+
+          <div className="bg-[#0a1520] border border-[#50bedc]/30 rounded-md p-3 text-center">
+            <div className="text-[#50bedc]/80 text-xs mb-2 uppercase tracking-wider">Systems</div>
+            <div className="flex items-center justify-center text-green-400 gap-1">
+              <Check className="h-4 w-4" />
+              <span>ONLINE</span>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </main>
+  )
+}

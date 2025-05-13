@@ -1,0 +1,9 @@
+websockets>=10.0
+opencv-python>=4.5.0
+numpy>=1.20.0
+psutil>=5.8.0
+Pillow>=8.0.0
+pyserial>=3.5
+# 以下依賴在樹莓派上安裝，在Mac開發環境中可能無法安裝
+# adafruit-circuitpython-servokit
+# adafruit-circuitpython-neopixel-spi

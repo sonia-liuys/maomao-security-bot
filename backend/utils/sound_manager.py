@@ -36,7 +36,8 @@ class SoundManager:
         self.sounds = {
             "intruder": "robot-bass.wav",    # For intruder detection
             "happy": "robot.wav",            # For happy/success states
-            "thinking": "robot-compute.wav"  # For processing/thinking states
+            "thinking": "robot-compute.wav", # For processing/thinking states
+            "angry": "robot-bass.wav"             # For shutdown/angry event
         }
         
         # Verify sounds exist

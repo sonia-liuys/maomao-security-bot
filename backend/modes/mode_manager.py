@@ -40,6 +40,10 @@ class ModeManager:
     def __init__(self, vision_system, servo_controller, movement_controller, config):
         """初始化模式管理器
         
+        # 音效播放狀態
+        self.last_thinking_sound_time = 0
+        self.last_face_detected = False
+        
         Args:
             vision_system: 視覺系統實例
             servo_controller: 伺服馬達控制器實例
@@ -205,6 +209,16 @@ class ModeManager:
     def _update_patrol_mode(self, vision_data):
         """更新巡邏模式
         
+        # --- Thinking sound on face detected ---
+        face_detected = vision_data.get("face_detected", False)
+        now = time.time()
+        if face_detected and not self.last_face_detected:
+            # Only play when face appears (not every frame)
+            if now - self.last_thinking_sound_time > 10.0:
+                self.sound_manager.play_thinking_sound()
+                self.last_thinking_sound_time = now
+        self.last_face_detected = face_detected
+        
         Args:
             vision_data (dict): 視覺系統提供的最新數據
         """
@@ -236,6 +250,16 @@ class ModeManager:
     
     def _update_surveillance_mode(self, vision_data):
         """更新監視模式
+        
+        # --- Thinking sound on face detected ---
+        face_detected = vision_data.get("face_detected", False)
+        now = time.time()
+        if face_detected and not self.last_face_detected:
+            # Only play when face appears (not every frame)
+            if now - self.last_thinking_sound_time > 10.0:
+                self.sound_manager.play_thinking_sound()
+                self.last_thinking_sound_time = now
+        self.last_face_detected = face_detected
         
         Args:
             vision_data (dict): 視覺系統提供的最新數據
@@ -399,11 +423,24 @@ class ModeManager:
                     }
                 }
                 
-                # 如果有WebSocket服務器實例，廣播識別結果
+                # 廣播警報模式消息 (為ESP32客戶端準備)
+                alarm_mode_message = {
+                    "type": "status_update",
+                    "data": {
+                        "mode": "alarm_mode"
+                    },
+                    "id": f"alarm_{int(time.time() * 1000)}"
+                }
+                
+                # 如果有WebSocket服務器實例，廣播識別結果和警報模式
                 if hasattr(self, "websocket_server") and self.websocket_server:
                     self.logger.info(f"{COLORS['BLUE']}[WEBSOCKET] 廣播警報消息到前端{COLORS['RESET']}")
                     self.logger.info(f"{COLORS['BLUE']}[WEBSOCKET] Broadcasting alarm message to frontend{COLORS['RESET']}")
                     self.websocket_server.broadcast_status(message)
+                    
+                    self.logger.info(f"{COLORS['BLUE']}[WEBSOCKET] 廣播警報模式消息 (mode=alarm_mode){COLORS['RESET']}")
+                    self.logger.info(f"{COLORS['BLUE']}[WEBSOCKET] Broadcasting alarm mode message (mode=alarm_mode){COLORS['RESET']}")
+                    self.websocket_server.broadcast_status(alarm_mode_message)
             elif self.surveillance_countdown > 0:
                 # 如果已經檢測到入侵者且倒計時大於0，則倒計時減1
                 self.surveillance_countdown -= 1
@@ -527,16 +564,30 @@ class ModeManager:
             }
         }
         
-        # 如果有WebSocket服務器實例，廣播識別結果
+        # 廣播正常模式消息 (為ESP32客戶端準備)
+        normal_mode_message = {
+            "type": "status_update",
+            "data": {
+                "mode": "normal"
+            },
+            "id": f"normal_{int(time.time() * 1000)}"
+        }
+        
+        # 如果有WebSocket服務器實例，廣播識別結果和正常模式
         if hasattr(self, "websocket_server") and self.websocket_server:
             self.logger.info(f"{COLORS['BLUE']}[WEBSOCKET] 廣播解除警報消息到前端{COLORS['RESET']}")
             self.logger.info(f"{COLORS['BLUE']}[WEBSOCKET] Broadcasting alarm clear message to frontend{COLORS['RESET']}")
             self.websocket_server.broadcast_status(message)
+            
+            self.logger.info(f"{COLORS['BLUE']}[WEBSOCKET] 廣播正常模式消息 (mode=normal){COLORS['RESET']}")
+            self.logger.info(f"{COLORS['BLUE']}[WEBSOCKET] Broadcasting normal mode message (mode=normal){COLORS['RESET']}")
+            self.websocket_server.broadcast_status(normal_mode_message)
+        
     
     def set_patrol_active(self, active):
         """設置巡邏模式活動狀態
         
-        Args:
+        Args: ... }}
             active (bool): 巡邏是否活動
         """
         self.logger.info(f"{COLORS['YELLOW']}[PATROL] 設置巡邏模式活動狀態為: {active}{COLORS['RESET']}")

@@ -9,6 +9,7 @@ import time
 from vision.vision_system import VisionSystem
 from servo.servo_controller import ServoController
 from utils import config_loader
+from utils.sound_manager import SoundManager
 
 
 def main():
@@ -17,6 +18,7 @@ def main():
     config = config_loader_inst.load_config()
     vision = VisionSystem(config.get('vision', {}))
     servo = ServoController(config.get('servo', {}))
+    sound_manager = SoundManager()
 
     print("[INFO] Starting vision system...")
     vision.start()
@@ -34,6 +36,9 @@ def main():
     time.sleep(0.8)
 
     print("[INFO] Starting face tracking demo. Press Ctrl+C to exit.")
+    # Thinking sound control
+    last_thinking_sound_time = 0
+    last_face_detected = False
     try:
         while True:
             vision_data = vision.get_latest_data()
@@ -41,7 +46,12 @@ def main():
             face_x = vision_data.get("face_x", 0.5)
             face_y = vision_data.get("face_y", 0.5)
 
+            now = time.time()
             if face_detected:
+                # Play thinking sound only once per detection, and at most every 10s
+                if not last_face_detected and (now - last_thinking_sound_time > 10.0):
+                    sound_manager.play_thinking_sound()
+                    last_thinking_sound_time = now
                 # Face detected: track and set eye to yellow
                 servo.set_eye_color("yellow")
                 servo.follow_face(face_x, face_y)
@@ -50,7 +60,7 @@ def main():
                 # No face: set eye to green (idle)
                 servo.set_eye_color("green")
                 print("[IDLE] No face detected.")
-
+            last_face_detected = face_detected
             time.sleep(0.1)
     except KeyboardInterrupt:
         print("\n[INFO] Exiting demo...")

@@ -205,8 +205,20 @@ class WebSocketServer:
             self.clients.add(websocket)
         
         client_info = f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
-        self.logger.info(f"新客戶端連接: {client_info}")
-        self.logger.info(f"New client connected: {client_info}")
+        
+        # 設置客戶端類型標記，默認為非ESP32
+        # Set client type flag, default to non-ESP32
+        websocket.esp32_client = False
+        
+        # 檢查路徑或其他標識以確定客戶端類型
+        # Check path or other identifiers to determine client type
+        if path and "esp32" in path.lower():
+            websocket.esp32_client = True
+            self.logger.info(f"ESP32客戶端連接: {client_info}")
+            self.logger.info(f"ESP32 client connected: {client_info}")
+        else:
+            self.logger.info(f"新客戶端連接: {client_info}")
+            self.logger.info(f"New client connected: {client_info}")
         
         try:
             # 發送初始狀態
@@ -559,11 +571,41 @@ class WebSocketServer:
         if not clients:
             return
         
+        # 解析消息以檢查類型
+        # Parse message to check type
+        try:
+            message_data = json.loads(message)
+            message_type = message_data.get("type", "")
+            
+            # 檢查是否是視頻消息
+            # Check if it's a video message
+            is_video_message = message_type == "video_frame"
+            
+            # 檢查是否包含警報模式信息
+            # Check if contains alarm mode information
+            has_alarm_mode = False
+            if "data" in message_data and isinstance(message_data["data"], dict):
+                has_alarm_mode = message_data["data"].get("mode") == "alarm_mode"
+        except (json.JSONDecodeError, AttributeError):
+            # 不是有效的JSON或不包含預期結構，處理為非視頻消息
+            # Not valid JSON or doesn't contain expected structure, treat as non-video message
+            is_video_message = False
+            has_alarm_mode = False
+        
         # 創建所有發送任務
         # Create all send tasks
         send_tasks = []
         for client in clients:
             if self._is_connection_closed(client):
+                continue
+            
+            # 檢查客戶端是否是ESP32
+            # Check if client is ESP32
+            is_esp32_client = hasattr(client, "esp32_client") and client.esp32_client
+            
+            # 如果是ESP32客戶端且是視頻消息但不是警報模式消息，則跳過
+            # If it's an ESP32 client and a video message but not an alarm mode message, skip
+            if is_esp32_client and is_video_message and not has_alarm_mode:
                 continue
             
             # 創建發送任務

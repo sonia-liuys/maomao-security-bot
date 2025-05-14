@@ -19,21 +19,22 @@ from communication.websocket_server import WebSocketServer
 from modes.mode_manager import ModeManager, RobotMode
 from safety.watchdog import Watchdog
 
+from utils.sound_manager import SoundManager
+
 class RobotController:
     """Robot Main Controller class, responsible for coordinating all subsystems
     機器人主控制器類，負責協調所有子系統"""
     
     def __init__(self, config):
         """Initialize robot controller
-        
         Args:
             config (dict): Robot configuration
-            
         初始化機器人控制器
-        
         Args:
             config (dict): 機器人配置
         """
+        self.sound_manager = SoundManager()
+        print("[RobotController] sound_manager initialized")
         self.logger = logging.getLogger("Robot")
         self.config = config
         self.running = False
@@ -91,6 +92,9 @@ class RobotController:
         啟動機器人所有子系統"""
         self.logger.info("Starting robot...")
         self.logger.info("啟動機器人...")
+
+        # 開機音效
+        self.sound_manager.play_happy_sound()
         
         # Start each subsystem
         # 啟動各子系統
@@ -476,6 +480,8 @@ class RobotController:
     def shutdown(self):
         """關閉機器人所有子系統"""
         self.logger.info("關閉機器人...")
+        # 關機音效
+        self.sound_manager.play_sound("angry")
         self.running = False
         
         # 關閉各子系統

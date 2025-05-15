@@ -161,6 +161,14 @@ class RobotController:
             try:
                 self.logger.info(f"Converting {mode_name} to RobotMode enum")
                 mode = RobotMode[mode_name.upper()]
+                
+                # Add special logging for surveillance mode (security control mode)
+                if mode == RobotMode.SURVEILLANCE:
+                    self.logger.warning(f"========================================")
+                    self.logger.warning(f" USER ACTIVATED SECURITY CONTROL MODE ")
+                    self.logger.warning(f"Mode switch: {self.mode_manager.current_mode} → SURVEILLANCE")
+                    self.logger.warning(f"========================================")
+
                 self.logger.info(f"Setting mode to: {mode}")
                 self.mode_manager.set_mode(mode)
                 self.logger.info(f"Successfully switched to {mode_name} mode")

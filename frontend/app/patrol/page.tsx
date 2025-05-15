@@ -25,27 +25,45 @@ export default function PatrolMode() {
   // 切換到巡邏模式
   useEffect(() => {
     if (isConnected && !hasSentCommandRef) {
-      console.log("準備發送命令...");
-      
-      // 添加延遲，確保連接已完全建立
-      const timer = setTimeout(() => {
-        try {
-          console.log("開始發送命令");
-          
-          // 切換到巡邏模式
-          setRobotMode("PATROL");
-          console.log("切換到巡邏模式");
-          
-          setHasSentCommandRef(true);
-          console.log("命令已發送標記已設置");
-        } catch (error) {
-          console.error("設置模式失敗:", error);
-        }
-      }, 1000);
-      
-      return () => clearTimeout(timer);
+      console.log("已連接到機器人");
+      // 不再自動切換到巡邏模式，等待用戶點擊按鈕
     }
-  }, [isConnected, setRobotMode, hasSentCommandRef]);
+  }, [isConnected, hasSentCommandRef]);
+
+  // 啟動巡邏模式
+  const startPatrolMode = () => {
+    try {
+      console.log("切換到巡邏模式");
+      // 切換到巡邏模式
+      setRobotMode("PATROL");
+      setHasSentCommandRef(true);
+      setStatusMessage("巡邏模式已啟動");
+    } catch (error) {
+      console.error("設置模式失敗:", error);
+    }
+  };
+  
+  // 結束巡邏模式
+  const stopPatrolMode = () => {
+    try {
+      console.log("結束巡邏模式");
+      // 先停止巡邏如果正在巡邏中
+      if (isPatrolling) {
+        sendCommand({
+          type: 'stop_patrol',
+          data: {}
+        });
+      }
+      
+      // 切換到闲置模式
+      setRobotMode("IDLE");
+      setHasSentCommandRef(false);
+      setIsPatrolling(false);
+      setStatusMessage("巡邏模式已停止");
+    } catch (error) {
+      console.error("停止模式失敗:", error);
+    }
+  };
 
   // 監聽最後收到的消息
   useEffect(() => {
@@ -53,8 +71,9 @@ export default function PatrolMode() {
     
     try {
       // 檢查是否是巡邏狀態更新消息
-      if (typeof lastMessage === 'object' && lastMessage.type === 'status_update') {
-        const data = lastMessage.data;
+      const message = lastMessage as { type: string; data: any };
+      if (message && message.type === 'status_update') {
+        const data = message.data;
         if (data && data.patrol_active !== undefined) {
           setIsPatrolling(data.patrol_active);
           setStatusMessage(data.patrol_active ? "正在巡邏中..." : "巡邏已停止");
@@ -83,6 +102,17 @@ export default function PatrolMode() {
     }
     // 預先更新UI狀態以提供即時反饋
     setIsPatrolling(!isPatrolling);
+  };
+  
+  // 暫停巡邏功能
+  const pausePatrol = () => {
+    // 發送暫停巡邏命令
+    sendCommand({
+      type: 'stop_patrol',
+      data: {}
+    });
+    setIsPatrolling(false);
+    setStatusMessage("巡邏已暫停");
   };
 
   const toggleCamera = () => {
@@ -126,24 +156,50 @@ export default function PatrolMode() {
 
         {/* 巡邏控制按鈕 */}
         <div className="grid grid-cols-1 gap-4 mb-4">
-          <Button 
-            className={`${isPatrolling ? 'bg-red-700 hover:bg-red-800' : 'bg-green-700 hover:bg-green-800'} text-white p-4 h-16`}
-            onClick={togglePatrol}
-          >
-            <div className="flex items-center justify-center w-full">
-              {isPatrolling ? (
-                <>
-                  <Square className="h-6 w-6 mr-2" />
-                  <span className="text-lg">停止巡邏</span>
-                </>
-              ) : (
-                <>
-                  <Play className="h-6 w-6 mr-2" />
-                  <span className="text-lg">開始巡邏</span>
-                </>
-              )}
+          {!hasSentCommandRef ? (
+            <Button 
+              className="bg-green-700 hover:bg-green-800 text-white p-4 h-16"
+              onClick={startPatrolMode}
+            >
+              <div className="flex items-center justify-center w-full">
+                <Play className="h-6 w-6 mr-2" />
+                <span className="text-lg">啟動巡邏模式</span>
+              </div>
+            </Button>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {/* 開始/停止巡邏按鈕 */}
+              <Button 
+                className={`${isPatrolling ? 'bg-orange-600 hover:bg-orange-700' : 'bg-green-700 hover:bg-green-800'} text-white p-4 h-16`}
+                onClick={isPatrolling ? pausePatrol : togglePatrol}
+              >
+                <div className="flex items-center justify-center w-full">
+                  {isPatrolling ? (
+                    <>
+                      <Square className="h-6 w-6 mr-2" />
+                      <span className="text-lg">暫停巡邏</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-6 w-6 mr-2" />
+                      <span className="text-lg">開始巡邏</span>
+                    </>
+                  )}
+                </div>
+              </Button>
+              
+              {/* 結束巡邏模式按鈕 */}
+              <Button 
+                className="bg-red-700 hover:bg-red-800 text-white p-4 h-12 mt-2"
+                onClick={stopPatrolMode}
+              >
+                <div className="flex items-center justify-center w-full">
+                  <Square className="h-4 w-4 mr-2" />
+                  <span className="text-md">結束巡邏模式</span>
+                </div>
+              </Button>
             </div>
-          </Button>
+          )}
         </div>
 
         {/* 其他控制按鈕 */}

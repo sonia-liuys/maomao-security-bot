@@ -160,6 +160,21 @@ int getDistance() {
 }
 
 void loop() {
+
+
+  //✅ 超音波避障：當距離小於 20 公分時，機器人會停止
+  int d = getDistance();
+  if (d < 20 && d != 0) {
+    Serial.print(d);
+    Serial.println("🚨 障礙物偵測，停止！");
+    // 根據需要選擇向右或向左轉
+    stopAllMotors();
+    delay(1000);
+    return;
+  }
+
+
+
   // 檢查是否有串口指令
   checkSerialCommand();
   
@@ -206,25 +221,7 @@ void loop() {
   
   ps2x.read_gamepad(false, 0);
 
-  // ✅ 超音波避障：當距離小於 20 公分時，機器人會轉彎
-  // int d = getDistance();
-  // if (d < 20 && d != 0) {
-  //   Serial.print(d);
-  //   Serial.println("🚨 障礙物偵測，轉彎並後退！");
-  //   // 根據需要選擇向右或向左轉
-  //   stopAllMotors();
-  //   delay(1000);
-  //   //   // 後退一秒
-  //   setAllMotors(160);  // 設置馬達反向運行，後退
-  //   delay(1000);  // 後退1秒
   
-  //   stopAllMotors();
-  //   delay(500);
-  //   setMotorsTurnRight(140);  // 這裡設置轉向右邊，你也可以使用 setMotorsTurnLeft(180)
-  //   delay(1000);  // 控制轉彎的時間，可以根據實際情況調整
-  //   stopAllMotors();
-  //   return;
-  // }
 
 
   if(button_state ==1){
@@ -269,7 +266,15 @@ void loop() {
       }
     } else {
       Serial.println("turn right!");
-      ms = 140;
+      
+      // ✅ 轉彎 90 度
+      // ms = 400;
+
+      // ✅ 轉彎 180 度
+      ms = 800;
+      
+      setMotorsTurnRight(180);
+      delay(ms);
       setMotorsTurnRight(ms);
       if (now - square_start_time > square_turn_time) {
         square_step++;
@@ -349,7 +354,7 @@ void loop() {
     motorSpeed1 = motorSpeed2 = motorSpeed3 = motorSpeed4 = 160;
   } else if (turn_180) {
     setMotorsTurnRight(180);
-    delay(400);
+    delay(800);
     turn_180 = 0;
     return;
   } else if (turn_90_right) {

@@ -5,7 +5,8 @@ import styles from './page.module.css'
 import useRobotConnection from '@/hooks/useRobotConnection'
 import { Card } from "@/components/ui/card"
 import Navigation from "@/components/navigation"
-import { Shield, Check, AlertTriangle } from "lucide-react"
+import { Shield, Check, AlertTriangle, Play, Square } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 type Emotion = "happy" | "sad" | "neutral" | "excited" | "sleepy" | "suspicious" | "angry"
 
@@ -30,15 +31,35 @@ export default function SafetyMode() {
   
   // 監聽機器人狀態變化
   useEffect(() => {
-    if (robotConnected && !hasSentCommandRef.current) {
-      console.log('已連接到機器人，切換到監視模式');
+    if (robotConnected) {
+      console.log('已連接到機器人');
+      // 不再自動切換到監視模式，等待用戶點擊按鈕
+    }
+  }, [robotConnected]);
+  
+  // 啟動監視模式的函數
+  const startSurveillanceMode = () => {
+    if (!hasSentCommandRef.current) {
+      console.log('切換到監視模式');
       sendRobotCommand({
         type: 'set_mode',
         data: { mode: 'surveillance' }
       });
       hasSentCommandRef.current = true;
+      setStatusMessage("監視模式已啟動");
     }
-  }, [robotConnected, sendRobotCommand]);
+  };
+  
+  // 結束監視模式的函數
+  const stopSurveillanceMode = () => {
+    console.log('結束監視模式');
+    sendRobotCommand({
+      type: 'set_mode',
+      data: { mode: 'idle' }
+    });
+    hasSentCommandRef.current = false;
+    setStatusMessage("監視模式已停止");
+  };
   
   // 定義消息類型
   interface RobotMessage {
@@ -226,6 +247,36 @@ export default function SafetyMode() {
                   {recognizedPerson && (
                     <div className="mt-4 text-xl text-center text-green-400">
                       {recognizedPerson}
+                    </div>
+                  )}
+
+                  {/* 啟動監視模式的按鈕 */}
+                  {!hasSentCommandRef.current && (
+                    <div className="mt-8">
+                      <Button 
+                        className="bg-green-700 hover:bg-green-800 text-white p-4 h-16"
+                        onClick={startSurveillanceMode}
+                      >
+                        <div className="flex items-center justify-center w-full">
+                          <Play className="h-6 w-6 mr-2" />
+                          <span className="text-lg">啟動監視模式</span>
+                        </div>
+                      </Button>
+                    </div>
+                  )}
+                  
+                  {/* 結束監視模式的按鈕 */}
+                  {hasSentCommandRef.current && (
+                    <div className="mt-8">
+                      <Button 
+                        className="bg-red-700 hover:bg-red-800 text-white p-4 h-16"
+                        onClick={stopSurveillanceMode}
+                      >
+                        <div className="flex items-center justify-center w-full">
+                          <Square className="h-6 w-6 mr-2" />
+                          <span className="text-lg">結束監視模式</span>
+                        </div>
+                      </Button>
                     </div>
                   )}
 

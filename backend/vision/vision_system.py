@@ -394,10 +394,12 @@ class VisionSystem:
         self.logger.info("視覺系統已停止")
     
     def _process_frames(self):
-        """Main loop for processing camera frames
-處理攝像頭幀的主循環"""
-        last_classification_time = 0
-        classification_interval = 3.0  # 每3秒分類一次
+        """主循環處理攝像頭幀
+        Main loop for processing camera frames"""
+        last_classification_time = 0  # 上次人臉識別的時間
+        last_tracking_time = 0  # 上次人臉追蹤的時間
+        classification_interval = 3.0  # 人臉識別間隔：每3秒分類一次
+        tracking_interval = 0.5  # 人臉追蹤間隔：每0.5秒更新位置一次
         
         while self.running:
             current_time = time.time()
@@ -416,10 +418,17 @@ class VisionSystem:
             with self.lock:
                 self.latest_frame = frame.copy()
             
-            # 只在指定間隔時間進行分類
+            # 高頻率更新人臉位置追蹤
+            # High-frequency update for face position tracking
+            if current_time - last_tracking_time >= tracking_interval:
+                self._update_face_position(frame)
+                last_tracking_time = current_time
+            
+            # 低頻率更新人臉識別
+            # Low-frequency update for face recognition
             if current_time - last_classification_time >= classification_interval:
-                # Process frame
-                # 處理幀
+                # Full analysis including face recognition
+                # 包含人臉識別的完整分析
                 self._analyze_frame(frame)
                 last_classification_time = current_time
                 self.logger.info(f"Classification performed at {datetime.now().strftime('%H:%M:%S')}")
@@ -428,16 +437,80 @@ class VisionSystem:
             # 控制幀捕獲頻率
             time.sleep(0.03)  # 約30fps的幀捕獲率
     
-    def _analyze_frame(self, frame):
-        """Analyze a frame
-        
-        Args:
-            frame: The image frame to analyze
-            
-        分析一幀圖像
+    def _update_face_position(self, frame):
+        """僅更新人臉位置數據，不進行人臉識別
+        Only update face position data without face recognition
         
         Args:
             frame: 要分析的圖像幀
+            frame: The image frame to analyze
+        """
+        # 轉換為灰度圖像用於人臉檢測
+        # Convert to grayscale for face detection
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # 檢測人臉
+        # Detect faces
+        faces = self.face_cascade.detectMultiScale(
+            gray, 
+            scaleFactor=1.1, 
+            minNeighbors=5, 
+            minSize=(30, 30)
+        )
+        
+        # 保留目前已有的識別數據
+        # Retain existing recognition data
+        with self.lock:
+            data = self.latest_data.copy()
+        
+        # 更新時間戳和人臉檢測狀態
+        # Update timestamp and face detection status
+        data["timestamp"] = time.time()
+        data["face_detected"] = len(faces) > 0
+        
+        # 如果沒有檢測到人臉，提前返回
+        # If no faces detected, return early
+        if len(faces) == 0:
+            # 更新最新數據
+            # Update latest data
+            with self.lock:
+                self.latest_data = data
+            return
+        
+        # 處理最大的人臉
+        # Process the largest face
+        largest_face = max(faces, key=lambda face: face[2] * face[3])
+        x, y, w, h = largest_face
+        
+        # 計算人臉中心位置（正規化為0-1）
+        # Calculate face center position (normalized 0-1)
+        frame_w = getattr(self, 'frame_width', frame.shape[1]) or frame.shape[1]
+        frame_h = getattr(self, 'frame_height', frame.shape[0]) or frame.shape[0]
+        if frame_w == 0: frame_w = frame.shape[1]
+        if frame_h == 0: frame_h = frame.shape[0]
+        
+        face_center_x = (x + w/2) / frame_w
+        face_center_y = (y + h/2) / frame_h
+        face_center_x = max(0.0, min(1.0, face_center_x))
+        face_center_y = max(0.0, min(1.0, face_center_y))
+        
+        # 更新人臉位置數據
+        # Update face position data
+        data["face_x"] = face_center_x
+        data["face_y"] = face_center_y
+        
+        # 更新最新數據
+        # Update latest data
+        with self.lock:
+            self.latest_data = data
+    
+    def _analyze_frame(self, frame):
+        """分析一幀，包含人臉識別
+        Analyze a frame, including face recognition
+        
+        Args:
+            frame: 要分析的圖像幀
+            frame: The image frame to analyze
         """
         # Convert to grayscale for face detection
         # 轉換為灰度圖像用於人臉檢測

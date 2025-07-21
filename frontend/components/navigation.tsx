@@ -3,10 +3,33 @@
 import { useRouter, usePathname } from "next/navigation"
 import { Activity, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import useRobotConnection from "@/hooks/useRobotConnection"
 
 export default function Navigation() {
   const router = useRouter()
   const pathname = usePathname()
+  const { robotStatus, currentMode } = useRobotConnection()
+  
+  // Format the current robot mode for display
+  const getCurrentMode = () => {
+    // Log the current mode value for debugging
+    console.log("Current mode from hook:", currentMode);
+    
+    // Convert to uppercase string for consistent processing
+    let mode = String(currentMode || "UNKNOWN").toUpperCase();
+    
+    // Map mode names to more user-friendly display names
+    const modeDisplayMap: Record<string, string> = {
+      'MANUAL': 'REMOTE CONTROL',
+      'PATROL': 'PATROL',
+      'SURVEILLANCE': 'SECURITY',
+      'NONE': 'IDLE'
+    };
+    
+    const displayMode = modeDisplayMap[mode] || mode;
+    console.log("Final display mode:", displayMode);
+    return `MODE: ${displayMode}`;
+  }
 
   const pages = ["/safety", "/home", "/remote"]
   const currentIndex = pages.indexOf(pathname)
@@ -44,9 +67,9 @@ export default function Navigation() {
 
   return (
     <div className="flex items-center justify-between w-full px-4 py-3 bg-[#0a1520] bg-opacity-90 backdrop-blur-md border-b border-[#50bedc]/30">
-      <div className="flex items-center">
+      <div className="flex items-center bg-[#0a2530] px-3 py-1 rounded-full border border-[#50bedc]/30">
         <Activity className="h-4 w-4 mr-2 text-[#50bedc]" />
-        <span className="text-sm text-[#50bedc]">SYSTEM ACTIVE</span>
+        <span className="text-sm font-medium text-[#50bedc]">{getCurrentMode()}</span>
       </div>
 
       <div className="flex items-center gap-4">

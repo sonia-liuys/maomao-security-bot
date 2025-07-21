@@ -18,36 +18,36 @@ import useRobotConnection from "@/hooks/useRobotConnection"
 export default function PatrolMode() {
   const [videoActive, setVideoActive] = useState(true)
   const [isPatrolling, setIsPatrolling] = useState(false)
-  const [statusMessage, setStatusMessage] = useState("準備開始巡邏")
+  const [statusMessage, setStatusMessage] = useState("Ready to start patrol")
   const { isConnected, setRobotMode, sendCommand, lastMessage, robotStatus } = useRobotConnection()
   const [hasSentCommandRef, setHasSentCommandRef] = useState(false)
 
-  // 切換到巡邏模式
+  // Switch to patrol mode
   useEffect(() => {
     if (isConnected && !hasSentCommandRef) {
-      console.log("已連接到機器人");
-      // 不再自動切換到巡邏模式，等待用戶點擊按鈕
+      console.log("Connected to robot");
+      // No longer auto-switch to patrol mode, waiting for user button click
     }
   }, [isConnected, hasSentCommandRef]);
 
-  // 啟動巡邏模式
+  // Start Patrol Mode
   const startPatrolMode = () => {
     try {
-      console.log("切換到巡邏模式");
-      // 切換到巡邏模式
+      console.log("Switching to patrol mode");
+      // Switch to patrol mode
       setRobotMode("PATROL");
       setHasSentCommandRef(true);
-      setStatusMessage("巡邏模式已啟動");
+      setStatusMessage("Patrol Mode Started");
     } catch (error) {
-      console.error("設置模式失敗:", error);
+      console.error("Failed to set mode:", error);
     }
   };
   
-  // 結束巡邏模式
+  // End Patrol Mode
   const stopPatrolMode = () => {
     try {
-      console.log("結束巡邏模式");
-      // 先停止巡邏如果正在巡邏中
+      console.log("Ending patrol mode");
+      // First stop patrolling if currently active
       if (isPatrolling) {
         sendCommand({
           type: 'stop_patrol',
@@ -55,64 +55,64 @@ export default function PatrolMode() {
         });
       }
       
-      // 切換到闲置模式
+      // Switch to idle mode
       setRobotMode("IDLE");
       setHasSentCommandRef(false);
       setIsPatrolling(false);
-      setStatusMessage("巡邏模式已停止");
+      setStatusMessage("Patrol Mode Stopped");
     } catch (error) {
-      console.error("停止模式失敗:", error);
+      console.error("Failed to stop mode:", error);
     }
   };
 
-  // 監聽最後收到的消息
+  // Listen for the latest message
   useEffect(() => {
     if (!lastMessage) return;
     
     try {
-      // 檢查是否是巡邏狀態更新消息
+      // Check if this is a patrol status update message
       const message = lastMessage as { type: string; data: any };
       if (message && message.type === 'status_update') {
         const data = message.data;
         if (data && data.patrol_active !== undefined) {
           setIsPatrolling(data.patrol_active);
-          setStatusMessage(data.patrol_active ? "正在巡邏中..." : "巡邏已停止");
+          setStatusMessage(data.patrol_active ? "Patrolling..." : "Patrol stopped");
         }
       }
     } catch (error) {
-      console.error('處理消息時出錯:', error);
+      console.error('Error processing message:', error);
     }
   }, [lastMessage]);
 
   const togglePatrol = () => {
     if (isPatrolling) {
-      // 停止巡邏
+      // Stop patrol
       sendCommand({
         type: 'stop_patrol',
         data: {}
       });
-      setStatusMessage("正在停止巡邏...");
+      setStatusMessage("Stopping patrol...");
     } else {
-      // 開始巡邏
+      // Start patrol
       sendCommand({
         type: 'start_patrol',
         data: {}
       });
-      setStatusMessage("正在啟動巡邏...");
+      setStatusMessage("Starting patrol...");
     }
     // 預先更新UI狀態以提供即時反饋
     setIsPatrolling(!isPatrolling);
   };
   
-  // 暫停巡邏功能
+  // Pause patrol function
   const pausePatrol = () => {
-    // 發送暫停巡邏命令
+    // Send command to pause patrol
     sendCommand({
       type: 'stop_patrol',
       data: {}
     });
     setIsPatrolling(false);
-    setStatusMessage("巡邏已暫停");
+    setStatusMessage("Patrol paused");
   };
 
   const toggleCamera = () => {
@@ -135,26 +135,26 @@ export default function PatrolMode() {
       <Navigation />
       <Card className="w-full max-w-2xl bg-[#0a1520] border-[#50bedc]/30 p-6 flex flex-col mt-4">
         <div className="flex justify-between items-center mb-4">
-          <div className="text-[#50bedc] text-lg">巡邏模式</div>
+          <div className="text-[#50bedc] text-lg">Patrol Mode</div>
           <div className="flex gap-2">
             <Button variant="outline" size="icon" onClick={toggleCamera} className="h-8 w-8 border-[#50bedc]/30 text-[#50bedc]">
               {videoActive ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
-              <span className="sr-only">{videoActive ? "關閉" : "開啟"}攝像頭</span>
+              <span className="sr-only">{videoActive ? "Turn off" : "Turn on"} camera</span>
             </Button>
           </div>
         </div>
 
-        {/* 狀態顯示 */}
+        {/* Status Display */}
         <div className="mb-6 p-4 bg-[#0a1520] border border-[#50bedc]/30 rounded-md">
-          <div className="text-[#50bedc] text-sm mb-2">狀態</div>
+          <div className="text-[#50bedc] text-sm mb-2">Status</div>
           <div className="text-white">{statusMessage}</div>
           <div className="mt-2 flex items-center">
             <div className={`h-2 w-2 rounded-full ${isPatrolling ? "bg-green-500 animate-pulse" : "bg-gray-500"} mr-2`}></div>
-            <span className="text-xs text-gray-400">{isPatrolling ? "巡邏中" : "已停止"}</span>
+            <span className="text-xs text-gray-400">{isPatrolling ? "Patrolling" : "Stopped"}</span>
           </div>
         </div>
 
-        {/* 巡邏控制按鈕 */}
+        {/* Patrol Control Buttons */}
         <div className="grid grid-cols-1 gap-4 mb-4">
           {!hasSentCommandRef ? (
             <Button 
@@ -163,12 +163,12 @@ export default function PatrolMode() {
             >
               <div className="flex items-center justify-center w-full">
                 <Play className="h-6 w-6 mr-2" />
-                <span className="text-lg">啟動巡邏模式</span>
+                <span className="text-lg">Start Patrol Mode</span>
               </div>
             </Button>
           ) : (
             <div className="grid grid-cols-1 gap-4">
-              {/* 開始/停止巡邏按鈕 */}
+              {/* Start/Stop Patrol Button */}
               <Button 
                 className={`${isPatrolling ? 'bg-orange-600 hover:bg-orange-700' : 'bg-green-700 hover:bg-green-800'} text-white p-4 h-16`}
                 onClick={isPatrolling ? pausePatrol : togglePatrol}
@@ -177,44 +177,44 @@ export default function PatrolMode() {
                   {isPatrolling ? (
                     <>
                       <Square className="h-6 w-6 mr-2" />
-                      <span className="text-lg">暫停巡邏</span>
+                      <span className="text-lg">Pause Patrol</span>
                     </>
                   ) : (
                     <>
                       <Play className="h-6 w-6 mr-2" />
-                      <span className="text-lg">開始巡邏</span>
+                      <span className="text-lg">Begin Patrol</span>
                     </>
                   )}
                 </div>
               </Button>
               
-              {/* 結束巡邏模式按鈕 */}
+              {/* End Patrol Mode Button */}
               <Button 
                 className="bg-red-700 hover:bg-red-800 text-white p-4 h-12 mt-2"
                 onClick={stopPatrolMode}
               >
                 <div className="flex items-center justify-center w-full">
                   <Square className="h-4 w-4 mr-2" />
-                  <span className="text-md">結束巡邏模式</span>
+                  <span className="text-md">End Patrol Mode</span>
                 </div>
               </Button>
             </div>
           )}
         </div>
 
-        {/* 其他控制按鈕 */}
+        {/* Other Control Buttons */}
         <div className="grid grid-cols-2 gap-4">
           <Button className="bg-[#0a1520] hover:bg-[#152535] text-[#50bedc] p-3">
             <div className="flex flex-col items-center">
               <RotateCw className="h-5 w-5 mb-1" />
-              <span className="text-sm">旋轉巡邏</span>
+              <span className="text-sm">Rotate Patrol</span>
             </div>
           </Button>
           
           <Button className="bg-[#1a1520] hover:bg-[#251520] text-red-400 border-red-500/30 p-3">
             <div className="flex flex-col items-center">
               <Power className="h-5 w-5 mb-1" />
-              <span className="text-sm">關閉電源</span>
+              <span className="text-sm">Power Off</span>
             </div>
           </Button>
         </div>

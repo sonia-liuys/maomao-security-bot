@@ -16,6 +16,7 @@ import base64
 import cv2
 import inspect
 from datetime import datetime
+from utils.console_colors import COLORS
 
 class WebSocketServer:
     """WebSocket服務器類，處理與前端的通訊
@@ -43,7 +44,7 @@ class WebSocketServer:
         self.video_thread = None  # 視頻流線程 (Video streaming thread)
         self.lock = threading.Lock()
         self.video_streaming = False  # 視頻流狀態 (Video streaming status)
-        self.video_interval = 0.1  # 視頻幀發送間隔，秒 (Video frame sending interval in seconds)
+        self.video_interval = 0.5  # 視頻幀發送間隔，秒 (Video frame sending interval in seconds)
         self.vision_system = None  # 視覺系統實例 (Vision system instance)
         
         self.logger.info(f"WebSocket服務器初始化完成 (端口: {port})")
@@ -384,6 +385,79 @@ class WebSocketServer:
                 self.logger.error(f"發送視頻流停止響應時出錯: {e}")
                 self.logger.error(f"Error sending video stream stop response: {e}")
             
+            return
+            
+        elif command_type == "status_update" or command_type == "set_status":
+            # Handle status update command, particularly for triggering alarm mode
+            self.logger.info("接收到狀態更新命令")
+            self.logger.info("Received status update command")
+            
+            # Check if this is an alarm mode trigger from a client
+            robot_mode = data.get("robot_mode", "")
+            alert_type = data.get("alert", "")
+            
+            if robot_mode == "alarm":
+                self.logger.warning(f"{COLORS['RED']}收到警報模式觸發請求{COLORS['RESET']}")
+                self.logger.warning(f"{COLORS['RED']}Received alarm mode trigger request{COLORS['RESET']}")
+                
+                # Check if this should be broadcast to all clients
+                if alert_type == "broadcast":
+                    self.logger.warning(f"{COLORS['RED']}广播警報模式到所有客戶端{COLORS['RESET']}")
+                    self.logger.warning(f"{COLORS['RED']}Broadcasting alarm mode to all clients{COLORS['RESET']}")
+                    
+                    # Create a message to broadcast to all clients
+                    broadcast_message = {
+                        "type": "set_status",
+                        "robot_mode": "alarm",
+                        "robot_name": data.get("robot_name", "maomao"),
+                        "id": f"alarm_{int(time.time() * 1000)}"
+                    }
+                    
+                    # Broadcast to all clients
+                    #self.broadcast_status(broadcast_message)
+                    
+                    # Send response to the original client
+                    response = {
+                        "type": "command_response",
+                        "data": {
+                            "success": True,
+                            "message": "Alarm broadcast to all clients",
+                            "message_cht": "警報已广播到所有客戶端"
+                        },
+                        "id": command_id
+                    }
+                    
+                    try:
+                        await websocket.send(json.dumps(response))
+                    except Exception as e:
+                        self.logger.error(f"發送广播響應時出錯: {e}")
+                        self.logger.error(f"Error sending broadcast response: {e}")
+                    
+                    return
+                else:
+                    # Forward to robot controller as a trigger_alarm_mode command
+                    alarm_command = {
+                        "type": "trigger_alarm_mode",
+                        "data": {},
+                        "id": command_id
+                    }
+                    
+                    try:
+                        result = self.command_handler(alarm_command)
+                        
+                        # Add command ID to response
+                        if isinstance(result, dict):
+                            result["id"] = command_id
+                        
+                        # Send response
+                        await websocket.send(json.dumps(result))
+                        return
+                    except Exception as e:
+                        self.logger.error(f"觸發警報模式時出錯: {e}")
+                        self.logger.error(f"Error triggering alarm mode: {e}")
+            
+            # For other status updates, just broadcast the status
+            self.broadcast_status(data)
             return
         
         # 將命令轉發到機器人控制器

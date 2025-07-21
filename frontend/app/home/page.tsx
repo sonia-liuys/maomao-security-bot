@@ -123,7 +123,7 @@ export default function PatrolMode() {
             className={`bg-[#50bedc] hover:bg-[#3a9db8] text-black font-bold py-3 px-6 rounded-full flex items-center gap-2 ${patrolStarted ? 'opacity-50' : 'opacity-100'}`}
           >
             <Play className="h-5 w-5" />
-            {isStarting ? "啟動中..." : patrolStarted ? "巡邏中" : "開始巡邏"}
+            {isStarting ? "Starting..." : patrolStarted ? "Patrolling" : "Start Patrol"}
           </Button>
         </div>
       </div>

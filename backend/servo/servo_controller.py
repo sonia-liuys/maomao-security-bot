@@ -14,9 +14,18 @@ import math
 import os
 import sys
 import platform
+import importlib.util
+import subprocess
+
+# 配置日誌
+# Configure logging
+logging.basicConfig(level=logging.INFO, 
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    handlers=[logging.StreamHandler()])
 
 # 有條件地導入GPIO庫
 # Conditionally import GPIO library
+GPIO_AVAILABLE = False
 if platform.system() == 'Linux' and os.path.exists('/sys/firmware/devicetree/base/model'):
     try:
         import RPi.GPIO as GPIO
@@ -41,19 +50,91 @@ else:
 # 檢測運行環境
 IS_RASPBERRY_PI = platform.system() == 'Linux' and os.path.exists('/sys/firmware/devicetree/base/model')
 
-# 有條件地導入硬體相關庫
-if IS_RASPBERRY_PI:
+# LED控制方式選項: 'neopixel', 'arduino', 'gpio'
+# LED control methods: 'neopixel', 'arduino', 'gpio'
+LED_CONTROL_METHOD = os.environ.get('LED_CONTROL_METHOD', 'arduino')  # 預設使用Arduino
+
+# 伺服控制相關庫導入
+USE_ADAFRUIT_SERVO_KIT = False
+try:
+    # 首先檢查ServoKit是否可用，而不直接導入
+    if importlib.util.find_spec('adafruit_servokit') is not None:
+        try:
+            from adafruit_servokit import ServoKit
+            USE_ADAFRUIT_SERVO_KIT = True
+            logging.info("成功導入ServoKit庫")
+        except Exception as e:
+            logging.warning(f"ServoKit導入時發生錯誤: {e}")
+            USE_ADAFRUIT_SERVO_KIT = False
+    else:
+        logging.warning("無法找到ServoKit庫，將使用模擬模式")
+except ImportError:
+    logging.warning("無法導入ServoKit庫，將使用模擬模式")
+    USE_ADAFRUIT_SERVO_KIT = False
+except Exception as e:
+    logging.warning(f"ServoKit檢查時發生錯誤: {e}")
+    USE_ADAFRUIT_SERVO_KIT = False
+
+# NeoPixel相關庫導入
+USE_NEOPIXEL = False
+try:
+    # 首先檢查board和neopixel庫是否可用
+    if (importlib.util.find_spec('board') is not None and 
+        importlib.util.find_spec('neopixel') is not None):
+        try:
+            import board
+            import neopixel
+            USE_NEOPIXEL = LED_CONTROL_METHOD == 'neopixel'
+            logging.info("成功導入NeoPixel庫")
+        except Exception as e:
+            logging.warning(f"NeoPixel導入時發生錯誤: {e}")
+            USE_NEOPIXEL = False
+    else:
+        logging.warning("無法找到board或neopixel庫")
+except ImportError:
+    logging.warning("無法導入NeoPixel庫")
+    USE_NEOPIXEL = False
+except Exception as e:
+    logging.warning(f"NeoPixel檢查時發生錯誤: {e}")
+    USE_NEOPIXEL = False
+
+# 檢查是否使用Arduino控制LED
+# Check if using Arduino for LED control
+USE_ARDUINO = LED_CONTROL_METHOD == 'arduino'
+if USE_ARDUINO:
     try:
-        from adafruit_servokit import ServoKit
-        import board
-        import neopixel_spi as neopixel
-        HARDWARE_AVAILABLE = True
-    except ImportError:
-        HARDWARE_AVAILABLE = False
-        logging.warning("硬體相關庫導入失敗，將使用模擬模式")
+        # 確認pyserial庫是否可用
+        if importlib.util.find_spec('serial') is not None:
+            try:
+                import serial
+                from .arduino_controller import ArduinoController
+                logging.info("成功導入Arduino控制器")
+            except ImportError as e:
+                logging.warning(f"無法導入Arduino控制器: {e}")
+                USE_ARDUINO = False
+            except Exception as e:
+                logging.warning(f"Arduino控制器導入時發生錯誤: {e}")
+                USE_ARDUINO = False
+        else:
+            logging.warning("無法找到pyserial庫，無法使用Arduino控制")
+            USE_ARDUINO = False
+    except Exception as e:
+        logging.warning(f"檢查pyserial時發生錯誤: {e}")
+        USE_ARDUINO = False
+
+# 設置硬件可用性標誌
+HARDWARE_AVAILABLE = USE_ADAFRUIT_SERVO_KIT or USE_NEOPIXEL or USE_ARDUINO or GPIO_AVAILABLE
+if not HARDWARE_AVAILABLE:
+    logging.warning("沒有可用的硬件控制庫，將使用完全模擬模式")
+    logging.warning("No hardware control libraries available, using complete simulation mode")
 else:
-    HARDWARE_AVAILABLE = False
-    logging.info("在非樹莓派環境運行，將使用模擬模式")
+    logging.info(f"硬件支持狀態 - GPIO: {GPIO_AVAILABLE}, ServoKit: {USE_ADAFRUIT_SERVO_KIT}, NeoPixel: {USE_NEOPIXEL}, Arduino: {USE_ARDUINO}")
+    logging.info(f"當前LED控制方式: {LED_CONTROL_METHOD}")
+
+# 中心追蹤區域定義
+# Central tracking zone definition
+CENTER_ZONE_MIN = 0.25  # 中心區域左邊界
+CENTER_ZONE_MAX = 0.75  # 中心區域右邊界
 
 class ServoController:
     """伺服馬達控制器類，管理機器人的伺服馬達"""
@@ -148,43 +229,113 @@ class ServoController:
         
         根據環境初始化真實硬體或模擬硬體
         """
-        self.logger.info("初始化伺服馬達硬體連接...")
-        
-        # 初始化變數
-        self.kit = None
-        self.pixels = None
-        self.num_pixels = 7  # LED數量
-        
-        if IS_RASPBERRY_PI and HARDWARE_AVAILABLE:
-            try:
-                # 初始化ServoKit
-                self.logger.info("初始化Adafruit ServoKit...")
-                self.kit = ServoKit(channels=16)
-                
-                # 設置初始位置
-                self.kit.servo[self.SERVO_EYE].angle = 90
-                self.kit.servo[self.SERVO_NECK].angle = 90
-                self.kit.servo[self.SERVO_LEFT_LID_LOWER].angle = 160
-                self.kit.servo[self.SERVO_RIGHT_LID_LOWER].angle = 20
-                self.kit.servo[self.SERVO_LEFT_LID_UPPER].angle = 20
-                self.kit.servo[self.SERVO_RIGHT_LID_UPPER].angle = 160
-                
-                # 初始化NeoPixel LED
-                self.logger.info("初始化NeoPixel LED...")
-                spi = board.SPI()
-                self.pixels = neopixel.NeoPixel_SPI(spi, self.num_pixels, pixel_order=neopixel.GRB, auto_write=False)
-                
-                # 設置初始顏色
-                self._set_all_pixels(self.EYE_COLORS[self.eye_color])
-                
-                self.logger.info("硬體初始化成功")
-                return True
-                
-            except Exception as e:
-                self.logger.error(f"硬體初始化失敗: {e}")
-                self.logger.warning("切換到模擬模式")
-        else:
-            self.logger.info("在開發環境中使用模擬模式")
+        with self.lock:
+            self.logger.info("初始化硬體連接")
+            self.logger.info("Initializing hardware connections")
+            
+            # 初始化伺服控制器
+            if IS_RASPBERRY_PI and USE_ADAFRUIT_SERVO_KIT:
+                try:
+                    self.logger.info("初始化硬體伺服控制器")
+                    self.logger.info("Initializing hardware servo controller")
+                    self.kit = ServoKit(channels=16)
+                    
+                    # 設置初始位置
+                    self.reset_all()
+                    
+                except Exception as e:
+                    self.logger.error(f"初始化硬體伺服控制器失敗: {e}")
+                    self.logger.error(f"Failed to initialize hardware servo controller: {e}")
+                    self.kit = None
+            else:
+                self.logger.info("使用模擬伺服控制器")
+                self.logger.info("Using simulated servo controller")
+                self.kit = None
+
+            # 初始化LED控制
+            # Initialize LED control
+            
+            # 1. 嘗試使用Arduino控制NeoPixel
+            # Try using Arduino to control NeoPixel
+            self.arduino = None
+            if IS_RASPBERRY_PI and USE_ARDUINO:
+                try:
+                    self.logger.info("嘗試初始化Arduino控制器用於LED控制")
+                    self.logger.info("Trying to initialize Arduino controller for LED control")
+                    self.arduino = ArduinoController()
+                    if self.arduino.connect():
+                        self.logger.info("Arduino連接成功，使用Arduino控制LED")
+                        self.logger.info("Arduino connected successfully, using Arduino for LED control")
+                        # 設置初始顏色
+                        color = self.EYE_COLORS[self.eye_color]
+                        self.arduino.set_color(color[0], color[1], color[2])
+                    else:
+                        self.logger.warning("Arduino連接失敗，將嘗試其他方法")
+                        self.logger.warning("Arduino connection failed, will try other methods")
+                        self.arduino = None
+                except Exception as e:
+                    self.logger.error(f"初始化Arduino控制器失敗: {e}")
+                    self.logger.error(f"Failed to initialize Arduino controller: {e}")
+                    self.arduino = None
+            
+            # 2. 嘗試使用NeoPixel直接控制
+            # Try using NeoPixel directly
+            self.pixels = None
+            if IS_RASPBERRY_PI and USE_NEOPIXEL and self.arduino is None:
+                try:
+                    self.logger.info("初始化NeoPixel LED")
+                    self.logger.info("Initializing NeoPixel LEDs")
+                    # 使用D18引腳初始化7個RGB LED (眼睛)
+                    # Initialize 7 RGB LEDs (eyes) with D18 pin
+                    self.pixels = neopixel.NeoPixel(board.D18, 7, brightness=0.5, auto_write=False)
+                    self._set_all_pixels(self.EYE_COLORS[self.eye_color])
+                except Exception as e:
+                    self.logger.error(f"初始化NeoPixel失敗: {e}")
+                    self.logger.error(f"Failed to initialize NeoPixel: {e}")
+                    self.pixels = None
+            
+            # 3. 如果上述方法都失敗，則使用GPIO控制RGB LED
+            # If above methods fail, use GPIO to control RGB LED
+            self.rgb_pins = None
+            if IS_RASPBERRY_PI and GPIO_AVAILABLE and self.arduino is None and self.pixels is None:
+                try:
+                    self.logger.info("使用GPIO控制RGB LED")
+                    self.logger.info("Using GPIO to control RGB LED")
+                    # 定義RGB LED的GPIO引腳
+                    R_PIN = 16  # GPIO引腳用於紅色
+                    G_PIN = 20  # GPIO引腳用於綠色
+                    B_PIN = 21  # GPIO引腳用於藍色
+                    
+                    self.rgb_pins = {"R": R_PIN, "G": G_PIN, "B": B_PIN}
+                    
+                    # 設置GPIO模式
+                    GPIO.setup(R_PIN, GPIO.OUT)
+                    GPIO.setup(G_PIN, GPIO.OUT)
+                    GPIO.setup(B_PIN, GPIO.OUT)
+                    
+                    # 創建PWM實例
+                    self.pwm_r = GPIO.PWM(R_PIN, 100)  # 頻率100Hz
+                    self.pwm_g = GPIO.PWM(G_PIN, 100)
+                    self.pwm_b = GPIO.PWM(B_PIN, 100)
+                    
+                    # 啟動PWM
+                    self.pwm_r.start(0)  # 占空比0%
+                    self.pwm_g.start(0)
+                    self.pwm_b.start(0)
+                    
+                    # 設置初始顏色
+                    color = self.EYE_COLORS[self.eye_color]
+                    # 轉換0-255至0-100的PWM占空比
+                    self.pwm_r.ChangeDutyCycle(color[0] / 2.55)
+                    self.pwm_g.ChangeDutyCycle(color[1] / 2.55)
+                    self.pwm_b.ChangeDutyCycle(color[2] / 2.55)
+                except Exception as e:
+                    self.logger.error(f"使用GPIO控制RGB LED失敗: {e}")
+                    self.logger.error(f"Failed to use GPIO for RGB LED: {e}")
+                    self.rgb_pins = None
+            else:
+                self.logger.info("使用模擬LED控制")
+                self.logger.info("Using simulated LED control")
         
         # 模擬模式初始化
         time.sleep(0.5)
@@ -194,15 +345,23 @@ class ServoController:
     def _set_all_pixels(self, color):
         """設置所有LED像素為相同顏色
         
+        此方法僅用於直接使用NeoPixel控制時。如果使用Arduino或GPIO控制，
+        應該直接在set_eye_color中調用相應的方法。
+        
         Args:
-            color (tuple): RGB顏色值
+            color (tuple): RGB顏色值 (r, g, b)
         """
-        if self.pixels is None:
-            return
-            
-        for i in range(self.num_pixels):
-            self.pixels[i] = color
-        self.pixels.show()
+        if self.pixels is not None:
+            try:
+                for i in range(len(self.pixels)):
+                    self.pixels[i] = color
+                self.pixels.show()
+                return True
+            except Exception as e:
+                self.logger.error(f"NeoPixel設置像素失敗: {e}")
+                self.logger.error(f"Failed to set NeoPixel pixels: {e}")
+                return False
+        return False
     
     def start(self):
         """啟動伺服馬達控制器"""
@@ -446,6 +605,11 @@ class ServoController:
         # 關閉激光
         self.deactivate_laser()
     
+    # 儲存上一次的頸部角度，用於平滑過渡
+    # Store the last neck angle for smooth transitions
+    _last_neck_angle = 90
+    _last_eye_angle = 90
+    
     def follow_face(self, face_x, face_y):
         """控制眼睛和頸部跟隨人臉
         
@@ -453,27 +617,162 @@ class ServoController:
             face_x (float): 人臉X座標 (0-1)
             face_y (float): 人臉Y座標 (0-1)
         """
-        # 將0-1的座標映射到伺服馬達角度
-        # 眼睛方向: 左最多60度，右最多120度
-        # Eye direction: leftmost 60 degrees, rightmost 120 degrees
-        eye_angle = 60 + face_x * 60  # 0->60, 0.5->90, 1->120
+        # 計算眼睛目標角度
+        # Calculate eye target angle
+        target_eye_angle = 60 + (1 - face_x) * 60  # 0->120, 0.5->90, 1->60
         
-        # 頸部方向: 0->70, 0.5->90, 1->110
-        # Neck direction: 0->70, 0.5->90, 1->110
-        neck_angle = 70 + face_x * 40
+        # 定義中心跟蹤區域，在這個範圍內只移動眼睛不移動頸部
+        # Define the central tracking zone where only eyes move, neck stays still
+        CENTER_ZONE_MIN = 0.25  # 中心區域左邊界 (25%)
+        CENTER_ZONE_MAX = 0.75  # 中心區域右邊界 (75%)
         
-        # 確保角度在有效範圍內
-        # Ensure angles are within valid range
-        eye_angle = max(60, min(120, eye_angle))  # Clamp between 60-120
-        neck_angle = max(70, min(110, neck_angle))  # Clamp between 70-110
+        # 確保眼睛角度在有效範圍內
+        # Ensure eye angle is within valid range
+        target_eye_angle = max(60, min(120, target_eye_angle))
         
-        # 平滑設置眼睛和頸部位置
-        # Smoothly set eye and neck positions
-        self.move_servo_smooth(self.SERVO_EYE, eye_angle, step_size=2, delay=0.01)
-        self.move_servo_smooth(self.SERVO_NECK, neck_angle, step_size=2, delay=0.01)
+        # 頸部角度處理
+        # Handle neck angle
         
-        self.logger.debug(f"跟隨人臉: 位置({face_x:.2f}, {face_y:.2f}) -> 眼睛角度: {eye_angle:.1f}, 頸部角度: {neck_angle:.1f}")
-        self.logger.debug(f"Following face: position({face_x:.2f}, {face_y:.2f}) -> eye angle: {eye_angle:.1f}, neck angle: {neck_angle:.1f}")
+        # 如果人臉在中心區域內，保持頸部不動，只使用眼睛追蹤
+        # If face is in the central zone, keep the neck still, only use eyes for tracking
+        if CENTER_ZONE_MIN <= face_x <= CENTER_ZONE_MAX:
+            # 保持頸部的現有位置
+            # Maintain current neck position
+            if hasattr(ServoController, '_last_neck_angle'):
+                target_neck_angle = ServoController._last_neck_angle
+            else:
+                # 頸部的默認中心位置
+                # Default center position for neck if not initialized
+                target_neck_angle = 90
+        else:
+            # 如果人臉超出中心區域，計算頸部目標角度
+            # If face is outside the central zone, calculate neck target angle
+            target_neck_angle = 60 + (1 - face_x) * 60  # 0->120, 0.5->90, 1->60
+            target_neck_angle = max(60, min(120, target_neck_angle))
+        
+        # 平滑移動參數初始化
+        # Initialize smooth movement parameters
+        if not hasattr(ServoController, '_last_neck_angle'):
+            ServoController._last_neck_angle = 90
+        if not hasattr(ServoController, '_last_eye_angle'):
+            ServoController._last_eye_angle = 90
+            
+        # 計算目標與當前位置的差距
+        # Calculate the distance between target and current position
+        eye_distance = abs(target_eye_angle - ServoController._last_eye_angle)
+        neck_distance = abs(target_neck_angle - ServoController._last_neck_angle)
+        
+        # 調整眼睛追蹤策略，特別是當在中心區域時增強眼睛反應
+        # Adjust eye tracking strategy, especially enhance eye responsiveness in central zone
+        
+        # 如果在中心區域，眼睛要更活躍，因為頸部不參與追蹤
+        if CENTER_ZONE_MIN <= face_x <= CENTER_ZONE_MAX:
+            # 中心區域的眼睛參數：更高的適應性
+            if eye_distance < 5:  # 小角度調整
+                damping_factor_eye = 0.3  # 高於非中心區域的參數
+            elif eye_distance < 15:  # 中等角度調整
+                damping_factor_eye = 0.5  # 更快的反應
+            else:  # 大角度調整
+                damping_factor_eye = 0.7  # 非常快的眼睛反應
+                
+            # 中心區域內頸部完全不移動
+            damping_factor_neck = 0.0  # 頸部保持不動
+        else:
+            # 在週邊區域，使用正常的眼睛參數
+            if eye_distance < 5:  # 小角度調整
+                damping_factor_eye = 0.2
+            elif eye_distance < 15:  # 中等角度調整
+                damping_factor_eye = 0.4
+            else:  # 大角度調整
+                damping_factor_eye = 0.6
+            
+            # 在週邊區域才啟動頸部移動
+            # 頸部移動速度要根據人臉偏離中心的程度調整
+            # 人臉越遠離中心，頸部移動越快
+            edge_distance = 0
+            if face_x < CENTER_ZONE_MIN:  # 左邊約束區域
+                edge_distance = CENTER_ZONE_MIN - face_x  # 距離左端的距離(0~0.25)
+            elif face_x > CENTER_ZONE_MAX:  # 右邊約束區域
+                edge_distance = face_x - CENTER_ZONE_MAX  # 距離右端的距離(0~0.25)
+            
+            # 將偏離情況正規化到 0~1 範圍，作為加速係數
+            normalized_edge_factor = min(edge_distance * 4, 1.0)  # 使用 x4 来正規化，因為最大偏移是 0.25
+            
+            # 偏離越大，頸部移動越快
+            base_damping = 0.15  # 頸部基礎隔與係數
+            max_extra_damping = 0.35  # 頸部最大額外隔與係數
+            
+            # 計算加速係數，偏離越大隔與越小（移動越快）
+            damping_factor_neck = base_damping + normalized_edge_factor * max_extra_damping
+        
+        # 計算新的角度
+        # Calculate new angles
+        new_eye_angle = ServoController._last_eye_angle + (target_eye_angle - ServoController._last_eye_angle) * damping_factor_eye
+        new_neck_angle = ServoController._last_neck_angle + (target_neck_angle - ServoController._last_neck_angle) * damping_factor_neck
+        
+        # 更新記錄的上一次角度
+        # Update the stored last angles
+        ServoController._last_eye_angle = new_eye_angle
+        ServoController._last_neck_angle = new_neck_angle
+        
+        # 用於中心區域與週邊區域的不同移動策略
+        # Different movement strategies for central zone and peripheral zone
+        
+        # 在中心區域內，加強眼睛反應，頸部不移動
+        # Enhanced eye response in central zone, neck stays still
+        if CENTER_ZONE_MIN <= face_x <= CENTER_ZONE_MAX:
+            # 眼睛參數調整，提高反應速度
+            if eye_distance < 5:
+                eye_step_size = 2    # 較快的精細移動
+                eye_delay = 0.008    # 較快週期時間
+            elif eye_distance < 15:
+                eye_step_size = 3    # 中快速移動
+                eye_delay = 0.006    # 更快週期時間
+            else:
+                eye_step_size = 4    # 非常快速移動
+                eye_delay = 0.004    # 極短週期時間
+            
+            # 執行眼睛伺服馬達移動
+            self.move_servo_smooth(self.SERVO_EYE, new_eye_angle, step_size=eye_step_size, delay=eye_delay)
+            
+            # 中心區域內頸部完全不移動，直接跳過
+            # Neck completely stays still in central zone
+            pass
+        
+        # 在週邊區域，眼睛和頸部同時移動
+        # In peripheral zone, both eyes and neck move
+        else:
+            # 週邊區域的眼睛參數，較慢但也要配合頸部移動
+            if eye_distance < 5:
+                eye_step_size = 2    # 精細移動
+                eye_delay = 0.008    # 適當速度
+            else:
+                eye_step_size = 3    # 快速移動
+                eye_delay = 0.006    # 較高速度
+            
+            # 週邊區域的頸部參數，根據偏離程度調整
+            # 人臉越偏離中心，頸部移動越快
+            edge_distance = 0
+            if face_x < CENTER_ZONE_MIN:  # 左邊偏離
+                edge_distance = CENTER_ZONE_MIN - face_x
+            else:  # 右邊偏離
+                edge_distance = face_x - CENTER_ZONE_MAX
+            
+            # 偏離越大，頸部移動越急
+            if edge_distance < 0.1:  # 較小偏離
+                neck_step_size = 2
+                neck_delay = 0.01
+            else:  # 較大偏離
+                neck_step_size = 3
+                neck_delay = 0.005
+            
+            # 依次執行眼睛和頸部移動
+            # Execute eye movement first, then neck movement
+            self.move_servo_smooth(self.SERVO_EYE, new_eye_angle, step_size=eye_step_size, delay=eye_delay)
+            self.move_servo_smooth(self.SERVO_NECK, new_neck_angle, step_size=neck_step_size, delay=neck_delay)
+        
+        self.logger.debug(f"跟隨人臉: 位置({face_x:.2f}, {face_y:.2f}) -> 眼睛角度: {new_eye_angle:.1f}, 頸部角度: {new_neck_angle:.1f}")
+        self.logger.debug(f"Following face: position({face_x:.2f}, {face_y:.2f}) -> eye angle: {new_eye_angle:.1f}, neck angle: {new_neck_angle:.1f}")
     
 
     
@@ -615,27 +914,83 @@ class ServoController:
         """設置眼睛顏色
         
         Args:
-            color (str): 顏色名稱 ("green", "red", "yellow", "blue", "white", "off")
-        
+            color (str): 顏色名稱，可以是 "green", "red", "yellow", "blue", "white", "off"
+            
         Returns:
             bool: 操作是否成功
         """
-        if color not in self.EYE_COLORS:
-            self.logger.error(f"無效的眼睛顏色: {color}")
-            return False
-            
-        self.logger.info(f"設置眼睛顏色為 {color}")
-        self.logger.info(f"Setting eye color to {color}")
-        
         with self.lock:
-            self.eye_color = color
+            self.logger.info(f"設置眼睛顏色為: {color}")
+            self.logger.info(f"Setting eye color to: {color}")
             
-        # 設置 LED 顏色
-        rgb = self.EYE_COLORS[color]
-        self._set_all_pixels(rgb)
-        
-        return True
-        
+            # 驗證顏色
+            if color not in self.EYE_COLORS:
+                self.logger.error(f"不支持的眼睛顏色: {color}")
+                self.logger.error(f"Unsupported eye color: {color}")
+                return False
+            
+            # 存儲當前顏色
+            self.eye_color = color
+            rgb_color = self.EYE_COLORS[color]
+            
+            # 根據可用的控制方法設置LED顏色
+            # Set LED color based on available control method
+            
+            # 1. 優先使用Arduino控制 (如果可用)
+            # Use Arduino control if available
+            if self.arduino is not None:
+                try:
+                    self.logger.debug(f"通過Arduino設置LED顏色: {rgb_color}")
+                    success = self.arduino.set_color(rgb_color[0], rgb_color[1], rgb_color[2])
+                    if success:
+                        return True
+                    else:
+                        self.logger.error("通過Arduino設置顏色失敗，將嘗試其他方法")
+                except Exception as e:
+                    self.logger.error(f"Arduino設置眼睛顏色失敗: {e}")
+                    self.logger.error(f"Failed to set eye color via Arduino: {e}")
+                    # Arduino可能已斷開，重置為None以便下次重新連接
+                    self.arduino = None
+            
+            # 2. 如果Arduino不可用，嘗試使用NeoPixel
+            # If Arduino unavailable, try using NeoPixel
+            if self.pixels is not None:
+                try:
+                    self.logger.debug(f"通過NeoPixel設置LED顏色: {rgb_color}")
+                    self._set_all_pixels(rgb_color)
+                    return True
+                except Exception as e:
+                    self.logger.error(f"NeoPixel設置眼睛顏色失敗: {e}")
+                    self.logger.error(f"Failed to set eye color via NeoPixel: {e}")
+                    # NeoPixel可能出錯，重置以便未來再次嘗試
+                    self.pixels = None
+            
+            # 3. 如果前兩種方法都不可用，嘗試使用GPIO PWM控制RGB LED
+            # If first two methods unavailable, try using GPIO PWM for RGB LED
+            if self.rgb_pins is not None:
+                try:
+                    self.logger.debug(f"通過GPIO PWM設置RGB LED顏色: {rgb_color}")
+                    # 將RGB值(0-255)轉換為PWM值(0-100)
+                    r_pwm = rgb_color[0] / 2.55
+                    g_pwm = rgb_color[1] / 2.55
+                    b_pwm = rgb_color[2] / 2.55
+                    
+                    # 設置PWM值
+                    self.pwm_r.ChangeDutyCycle(r_pwm)
+                    self.pwm_g.ChangeDutyCycle(g_pwm)
+                    self.pwm_b.ChangeDutyCycle(b_pwm)
+                    return True
+                except Exception as e:
+                    self.logger.error(f"GPIO PWM設置RGB LED顏色失敗: {e}")
+                    self.logger.error(f"Failed to set eye color via GPIO PWM: {e}")
+                    self.rgb_pins = None
+            
+            # 4. 如果所有方法都失敗，只記錄顏色變化（模擬模式）
+            # If all methods fail, just log the color change (simulation mode)
+            self.logger.info(f"模擬模式：眼睛顏色已設為 {color}")
+            self.logger.info(f"Simulation mode: eye color set to {color}")
+            return True
+    
     def _check_for_blink(self):
         """檢查是否應該眨眼"""
         current_time = time.time()
@@ -651,8 +1006,6 @@ class ServoController:
             self.logger.debug("眼皮眨眼")
             self._blink_eyelids()
             self.next_eyelid_blink_time = current_time + random.uniform(self.eyelid_blink_interval_min, self.eyelid_blink_interval_max)
-        
-        # 兼容舊版本的自然眨眼
         if current_time > self.next_blink_time and self.natural_blinking:
             self.logger.debug("自然眨眼")
             self._blink()

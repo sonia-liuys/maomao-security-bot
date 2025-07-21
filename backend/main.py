@@ -6,6 +6,11 @@
 毛毛安全機器人 - 主程序
 """
 
+# 設置環境變量，必須在導入其他模塊前進行
+# 使用Arduino透過USB控制LED，解決樹莓派的MOSI引腳問題
+import os
+os.environ['LED_CONTROL_METHOD'] = 'arduino'
+
 import time
 import logging
 import signal

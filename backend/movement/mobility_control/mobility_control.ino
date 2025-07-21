@@ -275,7 +275,6 @@ void loop() {
       
       setMotorsTurnRight(180);
       delay(ms);
-      setMotorsTurnRight(ms);
       if (now - square_start_time > square_turn_time) {
         square_step++;
         square_start_time = now;
@@ -290,7 +289,7 @@ void loop() {
       stopAllMotors();
     }
 
-    delay(delay_period);
+    //delay(delay_period);
     return;
   }
 

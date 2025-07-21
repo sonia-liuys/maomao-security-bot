@@ -104,9 +104,9 @@ class RobotController:
         self.websocket_server.start()
         self.watchdog.start()
         
-        # Set initial mode (default is surveillance mode)
-        # 設置初始模式 (預設為監視模式)
-        self.mode_manager.set_mode(RobotMode.SURVEILLANCE)
+        # Set initial mode (default is Remote Control mode)
+        # 設置初始模式 (預設為遠程控制模式)
+        self.mode_manager.set_mode(RobotMode.MANUAL)
         
         self.running = True
         self.logger.info("Robot started")
@@ -438,6 +438,36 @@ class RobotController:
             
             return {"success": True, "message": "Eyelids closed", "message_cht": "眼睛已閉上"}
         
+        elif cmd_type == "trigger_alarm_mode":
+            # Handle trigger alarm mode command
+            self.logger.info("收到觸發警報模式命令")
+            self.logger.info("Received trigger alarm mode command")
+
+            # 1. Set eyes to red
+            self.servo_controller.set_eye_color("red")
+
+            # 2. Raise both arms
+            if hasattr(self.servo_controller, "raise_arms"):
+                self.servo_controller.raise_arms()
+            else:
+                # fallback: raise each arm if raise_arms doesn't exist
+                if hasattr(self.servo_controller, "raise_right_arm"):
+                    self.servo_controller.raise_right_arm()
+                if hasattr(self.servo_controller, "raise_left_arm"):
+                    self.servo_controller.raise_left_arm()
+
+            # 3. Activate laser
+            self.servo_controller.activate_laser()
+
+            # 4. Broadcast to all ESP32 websocket clients
+            alarm_message = {"mode": "alarm"}
+            if hasattr(self.websocket_server, "broadcast_status"):
+                self.websocket_server.broadcast_status(alarm_message)
+            else:
+                self.logger.warning("websocket_server does not support broadcast_status")
+
+            return {"success": True, "message": "Alarm mode triggered", "message_cht": "警報模式已啟動"}
+        
         else:
             return {"success": False, "message": "未知命令", "message_cht": "未知命令"}
     
@@ -483,7 +513,7 @@ class RobotController:
         self.logger.info("重置機器人...")
         self.servo_controller.reset_all()
         self.movement_controller.stop()
-        self.mode_manager.set_mode(RobotMode.SURVEILLANCE)
+        self.mode_manager.set_mode(RobotMode.MANUAL)
     
     def shutdown(self):
         """關閉機器人所有子系統"""

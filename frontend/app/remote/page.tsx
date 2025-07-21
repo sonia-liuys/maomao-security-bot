@@ -4,6 +4,13 @@ import { useState, useRef, useEffect } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Power,
   ArrowUp,
   ArrowDown,
@@ -19,7 +26,8 @@ import {
   Eye,
   EyeOff,
   Square,
-  AlertTriangle
+  AlertTriangle,
+  Bell
 } from "lucide-react"
 import Navigation from "@/components/navigation"
 import useRobotConnection from "@/hooks/useRobotConnection"
@@ -57,6 +65,7 @@ export default function RemoteMode() {
   const [faceDetectionActive, setFaceDetectionActive] = useState(false)
   const [laserActive, setLaserActive] = useState(false)
   const [patrolActive, setPatrolActive] = useState(false)
+  const [currentMode, setCurrentMode] = useState("MANUAL")
   const canvasRef = useRef<HTMLCanvasElement>(null)
   
   const { isConnected, setRobotMode, sendCommand, lastMessage, robotStatus } = useRobotConnection()
@@ -65,13 +74,15 @@ export default function RemoteMode() {
   // 使用ref追蹤是否已經發送過命令
   const hasSentCommandRef = useRef(false)
   
-  // 切換到手動模式並啟動視頻流
+  // Start video stream if needed, but don't change the robot mode
   useEffect(() => {
     if (isConnected && !hasSentCommandRef.current) {
       const timer = setTimeout(() => {
         try {
-          setRobotMode("MANUAL");
+          // No longer auto-switch to manual mode, preserving current mode
+          console.log("Connected to robot in Remote Control page");
           
+          // Only start the video stream if needed
           if (videoActive) {
             sendCommand({
               type: "start_video_stream",
@@ -81,23 +92,31 @@ export default function RemoteMode() {
           
           hasSentCommandRef.current = true;
         } catch (error) {
-          console.error("設置模式失敗:", error);
+          console.error("Failed to start video stream:", error);
         }
       }, 1000);
       
       return () => clearTimeout(timer);
     }
-  }, [isConnected, setRobotMode, videoActive, sendCommand])
+  }, [isConnected, videoActive, sendCommand])
   
-  // 監聽最後收到的消息，檢查警報狀態
+  // 監聽最後收到的消息，檢查警報狀態和更新當前模式
   useEffect(() => {
     if (!lastMessage) return;
     
     try {
       const message = lastMessage as RobotMessage;
       
-      if (message.type === 'status_update' && message.data && message.data.alarm_active !== undefined) {
-        setAlarmActive(message.data.alarm_active);
+      if (message.type === 'status_update' && message.data) {
+        // 更新警報狀態
+        if (message.data.alarm_active !== undefined) {
+          setAlarmActive(message.data.alarm_active);
+        }
+        
+        // 更新當前模式
+        if (message.data.mode) {
+          setCurrentMode(message.data.mode);
+        }
       }
       
       if (message.type === 'recognition_result' && message.data && message.data.eye_color === 'red') {
@@ -107,6 +126,13 @@ export default function RemoteMode() {
       console.error('處理消息時出錯:', error);
     }
   }, [lastMessage]);
+  
+  // 處理模式切換
+  const handleModeChange = (value: string) => {
+    setRobotMode(value);
+    setStatusMessage(`Switching to ${value} mode...`);
+    setCurrentMode(value);
+  };
   
   // 處理圖像加載
   const handleImageLoad = (image: HTMLImageElement, canvas: HTMLCanvasElement) => {
@@ -229,6 +255,16 @@ export default function RemoteMode() {
     setStatusMessage("Powering off...")
   }
   
+  // 觸發警報模式
+  const handleAlarmMode = () => {
+    sendCommand({
+      type: "trigger_alarm_mode",
+      data: {}
+    });
+    setAlarmActive(true);
+    setStatusMessage('已啟動警報模式！');
+  }
+
   // 處理移動命令
   const handleMove = (direction: string) => {
     sendCommand({
@@ -270,7 +306,7 @@ export default function RemoteMode() {
     });
   };
 
-  // 設置眼睛顏色
+  // Set eye color
   const setEyeColor = (color: string) => {
     sendCommand({
       type: "set_eye_color",
@@ -282,6 +318,29 @@ export default function RemoteMode() {
     <main className="flex min-h-screen flex-col items-center p-4 bg-[#050a10] text-white grid-bg">
       <Navigation />
       <Card className="w-full max-w-3xl bg-[#0a1520] border-[#50bedc]/30 p-4 flex flex-col mt-4">
+        {/* Mode selector and status */}
+        <div className="flex justify-between items-center mb-4 bg-[#0c1c2c] p-2 rounded-md border border-[#50bedc]/20">
+          <div className="flex-1">
+            <div className="text-[#50bedc] text-xs mb-1">ROBOT MODE</div>
+            <Select value={currentMode} onValueChange={handleModeChange}>
+              <SelectTrigger className="w-full bg-[#0a1520] border-[#50bedc]/30 h-8 text-sm">
+                <SelectValue placeholder="Select mode" />
+              </SelectTrigger>
+              <SelectContent className="bg-[#0a1520] border-[#50bedc]/30">
+                <SelectItem value="MANUAL" className="text-white hover:bg-[#152535]">Manual Control</SelectItem>
+                <SelectItem value="SURVEILLANCE" className="text-white hover:bg-[#152535]">Security Surveillance</SelectItem>
+                <SelectItem value="PATROL" className="text-white hover:bg-[#152535]">Patrol Mode</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="ml-4 text-xs">
+            <div className="text-[#50bedc]">STATUS</div>
+            <div className={`mt-1 px-2 py-1 rounded text-center ${alarmActive ? 'bg-red-900/50 text-red-300' : 'bg-green-900/50 text-green-300'}`}>
+              {alarmActive ? 'ALARM ACTIVE' : statusMessage}
+            </div>
+          </div>
+        </div>
+        
         {/* 頂部控制欄 */}
         <div className="flex justify-between items-center mb-2">
           <div className="text-[#50bedc] text-xs">CAMERA FEED</div>
@@ -367,10 +426,10 @@ export default function RemoteMode() {
 
           {/* 右側：功能按鈕和狀態控制 */}
           <div>
-            {/* 眼睛顏色控制 */}
+            {/* Eye Color Control */}
             <div className="mb-2">
               <div className="flex items-center mb-1">
-                <span className="text-[#50bedc] text-xs mr-2">眼睛顏色:</span>
+                <span className="text-[#50bedc] text-xs mr-2">Eye Color:</span>
                 <div className="flex gap-1 flex-1">
                   <Button 
                     size="sm"
@@ -403,7 +462,7 @@ export default function RemoteMode() {
                 className={`w-full h-8 ${laserActive ? 'bg-red-600 hover:bg-red-700' : 'bg-[#0a1520] hover:bg-[#152535] text-[#50bedc]'}`}
                 onClick={toggleLaser}
               >
-                {laserActive ? '關閉雷射' : '開啟雷射'}
+                {laserActive ? 'Disable Laser' : 'Enable Laser'}
               </Button>
             </div>
             
@@ -414,7 +473,21 @@ export default function RemoteMode() {
                 className={`w-full h-8 ${patrolActive ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-[#0a1520] hover:bg-[#152535] text-[#50bedc]'}`}
                 onClick={togglePatrol}
               >
-                {patrolActive ? '停止巡邏' : '開始巡邏'}
+                {patrolActive ? 'Stop Patrol' : 'Start Patrol'}
+              </Button>
+            </div>
+            
+            {/* 警報模式按鈕 */}
+            <div className="mb-2">
+              <Button 
+                size="sm"
+                className={`w-full h-8 bg-red-600 hover:bg-red-700 text-white`}
+                onClick={handleAlarmMode}
+              >
+                <div className="flex items-center justify-center w-full">
+                  <Bell className="h-4 w-4 mr-1" />
+                  <span>Trigger Alarm Mode</span>
+                </div>
               </Button>
             </div>
 
@@ -457,7 +530,7 @@ export default function RemoteMode() {
               >
                 <div className="flex items-center">
                   <AlertTriangle className={`h-4 w-4 mr-1 ${alarmActive ? 'animate-pulse' : ''}`} />
-                  <span className="text-xs">{alarmActive ? '解除警報' : '無警報'}</span>
+                  <span className="text-xs">{alarmActive ? 'Clear Alarm' : 'No Alarm'}</span>
                 </div>
               </Button>
 
@@ -468,7 +541,7 @@ export default function RemoteMode() {
               >
                 <div className="flex items-center">
                   <Power className="h-4 w-4 mr-1" />
-                  <span className="text-xs">電源</span>
+                  <span className="text-xs">Power</span>
                 </div>
               </Button>
             </div>

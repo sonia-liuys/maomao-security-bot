@@ -35,7 +35,9 @@ class SoundManager:
         # Define sound mappings
         self.sounds = {
             "intruder": "robot-bass.wav",    # For intruder detection
-            "happy": "robot.wav",            # For happy/success states
+            "happy": "robot-happy1.wav",            # For happy/success states
+            "happy2": "robot-happy2.wav",
+            "happy3": "robot-happy3.wav",
             "thinking": "robot-compute.wav", # For processing/thinking states
             "angry": "robot-bass.wav"             # For shutdown/angry event
         }

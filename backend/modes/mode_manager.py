@@ -56,21 +56,35 @@ class ModeManager:
         self.movement_controller = movement_controller
         self.config = config
         
+        # Sound manager may be part of the config
+        self.sound_manager = config.get("sound_manager", None)
+        self.websocket_server = config.get("websocket_server", None)
+        
         self.current_mode = None
         self.mode_start_time = 0
         
-        # 模式特定狀態
+        # 巡邏模式相關狀態
+        self.patrol_active = False  # 巡邏模式活動狀態
         self.patrol_last_move_time = 0
-        self.patrol_active = False  # 添加巡還模式活動狀態
+        self.patrol_last_arm_time = 0
+        self.patrol_last_eye_blink_time = 0
+        self.patrol_eye_blink_interval = 0  # Will be set randomly
+        
+        # LED眨眼相關變量
+        self.patrol_last_led_blink_time = 0
+        self.patrol_led_blink_interval = 0  # Will be set randomly
+        
+        # 監視模式相關狀態
         self.surveillance_countdown = 0
         self.surveillance_intruder_detected = False
         self.surveillance_yellow_warning = False  # 黃色警告狀態
         self.surveillance_yellow_start_time = 0  # 黃色警告開始時間
         self.detection_pause_until = 0  # 暂停偵測直到指定時間
         self.student_id_detection_pause_until = 0
-        self.alarm_active = False  # 添加警報狀態屬性
-        self.websocket_server = None  # 將在RobotController中設置
-        self.face_tracking_enabled = True  # 啟用人臉追蹤功能
+        
+        # 人臂追蹤相關狀態
+        self.face_tracking_enabled = True  # 預設開啟人臂追蹤
+        self.alarm_active = False  # 警報狀態屬性
         
         # 初始化音效管理器
         # Initialize sound manager
@@ -141,23 +155,47 @@ class ModeManager:
             # 停止所有眨眼功能
             self.logger.info(f"{COLORS['YELLOW']}[PATROL] 停止所有眨眼功能{COLORS['RESET']}")
             self.logger.info(f"{COLORS['YELLOW']}[PATROL] Stopping all blinking functions{COLORS['RESET']}")
-            self.servo_controller.stop_natural_blinking()
-            self.servo_controller.stop_led_blinking()
-            self.servo_controller.stop_eyelid_blinking()
+            # self.servo_controller.stop_natural_blinking()
+            # self.servo_controller.stop_led_blinking()
+            # self.servo_controller.stop_eyelid_blinking()
             
             # 設置眼睛顏色為黃色
             self.logger.info(f"{COLORS['YELLOW']}[EYE COLOR] 設置眼睛顏色為黃色{COLORS['RESET']}")
             self.logger.info(f"{COLORS['YELLOW']}[EYE COLOR] Setting eye color to yellow{COLORS['RESET']}")
             self.servo_controller.set_eye_color("yellow")
             
+            # 初始化手臂動作間隔
+            self.patrol_last_arm_time = time.time()
+            
+            # 實用動作：從強調效果
+            try:
+                # 執行一次眨眼動作，確保進入模式後立即有反應
+                self.servo_controller.close_eyelids()
+                time.sleep(0.3)
+                self.servo_controller.open_eyelids()
+                
+                self.servo_controller.start_natural_blinking()
+
+                self.servo_controller.start_arm_swinging()
+
+                # 設置眼睛為黃色，表示巡邏模式
+                self.servo_controller.set_eye_color("yellow")
+                self.logger.info(f"{COLORS['YELLOW']}[PATROL] 進入巡邏模式，設置眼睛為黃色{COLORS['RESET']}")
+                self.logger.info(f"{COLORS['YELLOW']}[PATROL] Entering patrol mode, setting eyes to yellow{COLORS['RESET']}")
+            except Exception as e:
+                self.logger.error(f"{COLORS['RED']}[PATROL] 初始化巡邏模式動作失敗: {str(e)}{COLORS['RESET']}")
+            
         elif mode == RobotMode.SURVEILLANCE:
-            # 監視模式下準備監控
-            self.logger.info(f"{COLORS['GREEN']}[SURVEILLANCE] 啟動監視模式{COLORS['RESET']}")
-            self.logger.info(f"{COLORS['GREEN']}[SURVEILLANCE] Starting surveillance mode{COLORS['RESET']}")
-            pass
-    
+            # 監視模式特有的初始化
+            self.face_tracking_enabled = True
+            self.logger.info(f"{COLORS['CYAN']}[FACE TRACKING] 啟用人臂追蹤{COLORS['RESET']}")
+            self.logger.info(f"{COLORS['CYAN']}[FACE TRACKING] Face tracking enabled{COLORS['RESET']}")
+            self.servo_controller.set_eye_color("blue")
+            self.logger.info(f"{COLORS['BLUE']}[SURVEILLANCE] 進入監視模式, 設置眼睛為藍色{COLORS['RESET']}")
+            self.logger.info(f"{COLORS['BLUE']}[SURVEILLANCE] Entering surveillance mode, setting eyes to blue{COLORS['RESET']}")
+
     def _exit_mode(self, mode):
-        """退出指定模式時的處理
+        """退出指定模式
         
         Args:
             mode (RobotMode): 要退出的模式
@@ -169,8 +207,13 @@ class ModeManager:
         
         # 模式特定清理
         if mode == RobotMode.PATROL:
-            # 停止巡還模式特有的行為
-            pass
+            # 停止巡邏模式特有的行為
+            self.patrol_active = False
+            self.servo_controller.stop_natural_blinking()
+            self.servo_controller.stop_arm_swinging()
+            self.face_tracking_enabled = False
+            self.logger.info(f"{COLORS['CYAN']}[FACE TRACKING] 停用人臉追蹤{COLORS['RESET']}")
+            self.logger.info(f"{COLORS['CYAN']}[FACE TRACKING] Face tracking disabled{COLORS['RESET']}")
         elif mode == RobotMode.SURVEILLANCE:
             # 停止監視模式特有的行為
             self.face_tracking_enabled = False
@@ -228,9 +271,162 @@ class ModeManager:
             
         current_time = time.time()
         
-        # 檢查是否需要移動
+        # 初始化 - 確保變量已正確初始化
+        if getattr(self, "patrol_last_eye_blink_time", 0) == 0:
+            # 初始化眼睛眨眼相關變量
+            self.patrol_last_eye_blink_time = current_time
+            self.patrol_eye_blink_interval = 3.0  # 很短的開始間隔以快速看到效果
+            
+            # 初始化 LED 眨眼相關變量
+            self.patrol_last_led_blink_time = current_time
+            self.patrol_led_blink_interval = 1.5  # 更频繁的 LED 眨眼間隔
+            
+            # 初始化手臂切換與移動變量
+            self.patrol_last_arm_time = current_time - 10.0  # 設置為已經經過10秒，使手臂動作更快發生
+            self.patrol_last_move_time = current_time
+            self.logger.info(f"{COLORS['CYAN']}[PATROL] Initializing patrol mode action variables{COLORS['RESET']}")
+            
+            # 啟動直接的眨眼
+            try:
+                # 立即執行一次眨眼動作以確保功能正常
+                self.logger.info(f"{COLORS['CYAN']}[PATROL] Patrol mode initial blink test{COLORS['RESET']}")
+                self.servo_controller.close_eyelids()
+                time.sleep(0.3)
+                self.servo_controller.open_eyelids()
+            except Exception as e:
+                self.logger.error(f"{COLORS['RED']}[PATROL] Initial blink test failed: {str(e)}{COLORS['RESET']}")
+        
+        # 1. 自動眼睛眨眼 (每10~30秒隨機眨眼一次) - 使用眼皮機構
+        if current_time - self.patrol_last_eye_blink_time > self.patrol_eye_blink_interval:
+            self.patrol_last_eye_blink_time = current_time
+            self.patrol_eye_blink_interval = random.uniform(10.0, 30.0)  # 10-30秒間隔
+            
+            # 直接執行眨眼動作
+            self.logger.info(f"{COLORS['CYAN']}[PATROL] Executing eyelid blink, next in {self.patrol_eye_blink_interval:.1f} seconds{COLORS['RESET']}")
+            
+            # 實現眼皮的眨眼動作
+            try:
+                # 關閉眼睛
+                self.servo_controller.close_eyelids()
+                time.sleep(0.3)  # 閉眼狀態保持短時間
+                # 打開眼睛
+                self.servo_controller.open_eyelids()
+            except Exception as e:
+                self.logger.error(f"{COLORS['RED']}[PATROL] Eyelid blink failed: {str(e)}{COLORS['RESET']}")
+                
+        # 2. LED台燈眨眼 (更高頻率，每1.5-4秒) - 顯示更多的活力
+        if current_time - self.patrol_last_led_blink_time > self.patrol_led_blink_interval:
+            self.patrol_last_led_blink_time = current_time
+            self.patrol_led_blink_interval = random.uniform(1.5, 4.0)  # 更短的間隔，增加活力感
+            
+            # 執行 LED 眨眼動作
+            self.logger.info(f"{COLORS['CYAN']}[PATROL] Executing LED blink, next in {self.patrol_led_blink_interval:.1f} seconds{COLORS['RESET']}")
+            
+            try:
+                # 保存現有顏色
+                current_color = "yellow"  # 預設巡邏模式為黃色
+                
+                # 關閉 LED
+                self.servo_controller.set_eye_color("off")
+                time.sleep(0.1)  # 很短暫的關閉時間
+                
+                # 恢復原來顏色
+                self.servo_controller.set_eye_color(current_color)
+            except Exception as e:
+                self.logger.error(f"{COLORS['RED']}[PATROL] LED blink failed: {str(e)}{COLORS['RESET']}")
+        
+        # 2. 人臂追蹤功能（追蹤檢測到的人臂）
+        if self.face_tracking_enabled and face_detected:
+            face_x = vision_data.get("face_x", 0.5)  # 預設在畫面中心
+            face_y = vision_data.get("face_y", 0.5)  # 預設在畫面中心
+            
+            # 紀錄臂部追蹤位置
+            self.logger.debug(f"{COLORS['CYAN']}[PATROL][FACE TRACKING] 追蹤人臂位置: x={face_x:.2f}, y={face_y:.2f}{COLORS['RESET']}")
+            self.logger.debug(f"{COLORS['CYAN']}[PATROL][FACE TRACKING] Tracking face position: x={face_x:.2f}, y={face_y:.2f}{COLORS['RESET']}")
+            
+            # 讓機器人追蹤人臂
+            try:
+                self.servo_controller.follow_face(face_x, face_y)
+            except Exception as e:
+                self.logger.error(f"{COLORS['RED']}[PATROL] 人臂追蹤失敗: {str(e)}{COLORS['RESET']}")
+            
+            # 如果辨識出特定人員，變更眼睛顏色為綠色
+            recognized_person = vision_data.get("recognized_person", None)
+            if recognized_person and "sonia" in recognized_person.lower():
+                try:
+                    self.servo_controller.set_eye_color("green")
+                    self.logger.info(f"{COLORS['GREEN']}[PATROL] 辨識出已知人員: {recognized_person}{COLORS['RESET']}")
+                    self.logger.info(f"{COLORS['GREEN']}[PATROL] Recognized known person: {recognized_person}{COLORS['RESET']}")
+                except Exception as e:
+                    self.logger.error(f"{COLORS['RED']}[PATROL] 設置眼睛顏色失敗: {str(e)}{COLORS['RESET']}")
+        
+        # 3. 隨機手臂動作 (更頻繁，每8-15秒隨機移動手臂)
+        # 即使在面部追蹤下也會進行手臂風格動作，增加活力感
+        if current_time - self.patrol_last_arm_time > random.uniform(8.0, 15.0):
+            self.patrol_last_arm_time = current_time
+            
+            # 擴展的手臂動作
+            arm_actions = [
+                "raise",              # 同時舉起兩面手臂
+                "lower",              # 同時放下兩面手臂
+                "raise_left",         # 只舉起左手
+                "raise_right",        # 只舉起右手
+                "wave_left",          # 左手揮手動作
+                "wave_right",         # 右手揮手動作
+                "alternate_raise"     # 交替舉起手臂
+            ]
+            
+            # 如果正在追蹤人臂，僅做輕微的手臂動作
+            if face_detected:
+                arm_actions = ["wave_left", "wave_right", "lower"]  # 只做哈囉者放下手臂
+            
+            arm_action = random.choice(arm_actions)
+            
+            self.logger.info(f"{COLORS['MAGENTA']}[PATROL] Performing random arm movement: {arm_action}{COLORS['RESET']}")
+            
+            try:
+                if arm_action == "raise":
+                    self.servo_controller.raise_arms()
+                elif arm_action == "lower":
+                    self.servo_controller.lower_arms()
+                elif arm_action == "raise_left":
+                    # Partial arm movement - only move one arm
+                    self.servo_controller.move_servo_smooth(self.servo_controller.SERVO_LEFT_ARM, 0, step_size=2, delay=0.02)
+                elif arm_action == "raise_right":
+                    # Partial arm movement - only move one arm
+                    self.servo_controller.move_servo_smooth(self.servo_controller.SERVO_RIGHT_ARM, 180, step_size=2, delay=0.02)
+                elif arm_action == "wave_left":
+                    # Left arm wave movement
+                    current_pos = 90
+                    # Wave motion - move back and forth 3 times
+                    for _ in range(3):
+                        self.servo_controller.move_servo_smooth(self.servo_controller.SERVO_LEFT_ARM, 60, step_size=5, delay=0.01)
+                        time.sleep(0.1)
+                        self.servo_controller.move_servo_smooth(self.servo_controller.SERVO_LEFT_ARM, 90, step_size=5, delay=0.01)
+                        time.sleep(0.1)
+                elif arm_action == "wave_right":
+                    # Right arm wave movement
+                    # Wave motion - move back and forth 3 times
+                    for _ in range(3):
+                        self.servo_controller.move_servo_smooth(self.servo_controller.SERVO_RIGHT_ARM, 120, step_size=5, delay=0.01)
+                        time.sleep(0.1)
+                        self.servo_controller.move_servo_smooth(self.servo_controller.SERVO_RIGHT_ARM, 90, step_size=5, delay=0.01)
+                        time.sleep(0.1)
+                elif arm_action == "alternate_raise":
+                    # Alternate raising and lowering arms for a dynamic effect
+                    self.servo_controller.move_servo_smooth(self.servo_controller.SERVO_LEFT_ARM, 0, step_size=5, delay=0.02)
+                    time.sleep(0.3)
+                    self.servo_controller.move_servo_smooth(self.servo_controller.SERVO_LEFT_ARM, 90, step_size=5, delay=0.02)
+                    time.sleep(0.2)
+                    self.servo_controller.move_servo_smooth(self.servo_controller.SERVO_RIGHT_ARM, 180, step_size=5, delay=0.02)
+                    time.sleep(0.3)
+                    self.servo_controller.move_servo_smooth(self.servo_controller.SERVO_RIGHT_ARM, 90, step_size=5, delay=0.02)
+            except Exception as e:
+                self.logger.error(f"{COLORS['RED']}[PATROL] Arm movement failed: {str(e)}{COLORS['RESET']}")
+        
+        # 4. 檢查是否需要移動 - 只有在沒有追蹤人臂時才隨機移動
         # 每隔一段時間隨機選擇一個方向移動
-        if current_time - self.patrol_last_move_time > 5.0:  # 每5秒移動一次
+        if not face_detected and current_time - self.patrol_last_move_time > 5.0:  # 每5秒移動一次
             self.patrol_last_move_time = current_time
             
             # 隨機選擇一個方向
@@ -240,13 +436,17 @@ class ModeManager:
             # 使用彩色日誌輸出移動信息
             self.logger.info(f"{COLORS['YELLOW']}[PATROL] 巡邏模式: 移動方向 {direction}{COLORS['RESET']}")
             self.logger.info(f"{COLORS['YELLOW']}[PATROL] Patrol mode: Moving {direction}{COLORS['RESET']}")
-            self.movement_controller.move(direction)
             
-            # 短暫移動後停止
-            time.sleep(1.0)
-            self.logger.info(f"{COLORS['YELLOW']}[PATROL] 停止移動{COLORS['RESET']}")
-            self.logger.info(f"{COLORS['YELLOW']}[PATROL] Stopping movement{COLORS['RESET']}")
-            self.movement_controller.stop()
+            try:
+                self.movement_controller.move(direction)
+                
+                # 短暫移動後停止
+                time.sleep(1.0)
+                self.logger.info(f"{COLORS['YELLOW']}[PATROL] 停止移動{COLORS['RESET']}")
+                self.logger.info(f"{COLORS['YELLOW']}[PATROL] Stopping movement{COLORS['RESET']}")
+                self.movement_controller.stop()
+            except Exception as e:
+                self.logger.error(f"{COLORS['RED']}[PATROL] 移動失敗: {str(e)}{COLORS['RESET']}")
     
     def _update_surveillance_mode(self, vision_data):
         """更新監視模式
@@ -330,6 +530,7 @@ class ModeManager:
                 "type": "recognition_result",
                 "data": {
                     "recognized": True,
+                    "name": recognized_person,  # Add explicit name field
                     "message": f"識別出已知人員: {recognized_person}, 暂停偵測30秒",
                     "countdown": 30,  # 顯示30秒倒計時
                     "confidence": confidence,
@@ -361,11 +562,13 @@ class ModeManager:
                 self.surveillance_yellow_start_time = current_time
                 
                 # 廣播警告消息到前端
+                intruder_name = recognized_person if recognized_person else "Unknown Intruder"
                 message = {
                     "type": "recognition_result",
                     "data": {
                         "recognized": False,
-                        "message": "檢測到不明人員",
+                        "name": intruder_name,  # Add explicit name field for intruder
+                        "message": f"檢測到不明人員: {intruder_name}",
                         "countdown": 5,  # 5秒黃色警告
                         "confidence": confidence,
                         "emoji": "⚠️",
@@ -411,11 +614,13 @@ class ModeManager:
                 self.alarm_active = True
                 
                 # 廣播警報消息到前端
+                intruder_name = recognized_person if recognized_person else "Unknown Intruder"
                 message = {
                     "type": "recognition_result",
                     "data": {
                         "recognized": False,
-                        "message": "檢測到入侵者",
+                        "name": intruder_name,  # Add explicit name field for intruder
+                        "message": f"檢測到入侵者: {intruder_name}",
                         "countdown": self.surveillance_countdown,
                         "confidence": confidence,
                         "emoji": "🚨",
@@ -427,7 +632,7 @@ class ModeManager:
                 alarm_mode_message = {
                     "type": "status_update",
                     "data": {
-                        "mode": "alarm_mode"
+                        "mode": "alarm"
                     },
                     "id": f"alarm_{int(time.time() * 1000)}"
                 }
@@ -566,10 +771,9 @@ class ModeManager:
         
         # 廣播正常模式消息 (為ESP32客戶端準備)
         normal_mode_message = {
-            "type": "status_update",
-            "data": {
-                "mode": "normal"
-            },
+            "type": "set_status",
+            "robot_mode": "normal",
+            "robot_name": "maomao",
             "id": f"normal_{int(time.time() * 1000)}"
         }
         
@@ -593,6 +797,13 @@ class ModeManager:
         self.logger.info(f"{COLORS['YELLOW']}[PATROL] 設置巡邏模式活動狀態為: {active}{COLORS['RESET']}")
         self.logger.info(f"{COLORS['YELLOW']}[PATROL] Setting patrol active state to: {active}{COLORS['RESET']}")
         self.patrol_active = active
+        
+        # 初始化巡邏模式相關變量
+        if active:
+            self.patrol_last_eye_blink_time = time.time()
+            self.patrol_eye_blink_interval = random.uniform(10.0, 30.0)
+            self.logger.info(f"{COLORS['CYAN']}[PATROL] 初始化眼睛眨眼周期: {self.patrol_eye_blink_interval:.1f} 秒{COLORS['RESET']}")
+            self.logger.info(f"{COLORS['CYAN']}[PATROL] Initialized eye blink interval: {self.patrol_eye_blink_interval:.1f} seconds{COLORS['RESET']}")
         
         # 如果啟動巡邏，確保模式設置為巡邏模式
         if active and self.current_mode != RobotMode.PATROL:

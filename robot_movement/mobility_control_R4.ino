@@ -1,5 +1,7 @@
 #include "MatrixMiniR4.h"
 
+
+
 void setup()
 {
   MiniR4.begin();
@@ -13,17 +15,17 @@ void setup()
 
 void loop()
 {
-  if(MiniR4.I2C1.MXLaser.getDistance() > 0)
-  {
-    MiniR4.M1.setPower(60);
-    MiniR4.M2.setPower(60);
-  }
-  else
-  {
-    MiniR4.M1.setPower((-50));
-    MiniR4.M2.setPower(0);
-    delay(1000);
-    // test
-  }
+  MiniR4.M1.setPower(60);
+  MiniR4.M2.setPower(60);
+  delay(2000);
+  MiniR4.M1.setPower(0);
+  MiniR4.M2.setPower(0);
+  delay(200);
+  MiniR4.M1.setPower(60);
+  MiniR4.M2.setPower((-60));
+  delay(500);
+  MiniR4.M1.setPower(0);
+  MiniR4.M2.setPower(0);
+  delay(200);
 
 }

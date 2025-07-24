@@ -1,0 +1,5 @@
+SpeechRecognition>=3.10.0
+pygame>=2.5.2
+gtts>=2.4.0
+pyaudio>=0.2.13
+requests>=2.25.0

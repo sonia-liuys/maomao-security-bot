@@ -23,6 +23,7 @@ void loop()
     MiniR4.M1.setPower((-50));
     MiniR4.M2.setPower(0);
     delay(1000);
+    // test
   }
 
 }

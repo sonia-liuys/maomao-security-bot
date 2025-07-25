@@ -28,6 +28,19 @@ MaoMao Security Robot has three main operating modes:
    - Uses AI visual recognition to identify specific faces and student IDs
    - Triggers alerts when anomalies are detected
 
+### Additional Features
+
+4. **Voice Interaction System**:
+   - Chinese voice recognition and response
+   - Multi-AI service support (OpenAI, Claude, Gemini, local Ollama)
+   - Intelligent mood analysis system
+   - Real-time emotion detection and response adaptation
+
+5. **Biometric Monitoring**:
+   - Body temperature monitoring
+   - Heart rate monitoring
+   - Health status tracking
+
 ## System Architecture
 
 The entire system is divided into frontend and backend components:
@@ -53,44 +66,103 @@ The backend is developed in Python and is responsible for controlling all the ro
 
 ## Code Structure
 
+The project is organized into several main modules:
+
 ### Backend Code Structure
 
 ```
 backend/
-├── main.py                  # Main program that starts the entire system
-├── config/                  # Configuration files
-│   └── settings.py          # System settings
-├── core/                    # Core control
-│   ├── robot_controller.py  # Main robot controller
-│   └── mode_manager.py      # Mode manager
-├── vision/                  # Vision system
-│   ├── camera.py            # Camera control
-│   └── recognition.py       # AI recognition
-├── movement/                # Movement system
-│   └── movement_controller.py # Movement controller
-├── servo/                   # Servo motor control
-│   └── servo_controller.py  # Servo motor controller
-├── communication/           # Communication system
-│   └── websocket_server.py  # WebSocket server
-└── safety/                  # Safety system
-    └── watchdog.py          # System monitor
+├── main.py                     # Main program that starts the entire system
+├── config.json                 # System configuration
+├── core/                       # Core control
+│   └── robot_controller.py     # Main robot controller
+├── vision/                     # Vision system
+│   └── vision_system.py        # Vision processing and AI recognition
+├── movement/                   # Movement system
+│   ├── movement_controller.py  # Movement controller
+│   └── mobility_control/       # Arduino mobility control
+│       └── mobility_control.ino
+├── servo/                      # Servo motor control
+│   ├── servo_controller.py     # Servo motor controller
+│   ├── arduino_controller.py   # Arduino communication
+│   └── arduino_led_controller/ # LED control firmware
+│       └── arduino_led_controller.ino
+├── communication/              # Communication system
+│   └── websocket_server.py     # WebSocket server
+├── safety/                     # Safety system
+│   └── watchdog.py             # System monitor
+├── modes/                      # Operating modes
+│   └── mode_manager.py         # Mode management
+├── models/                     # AI models
+│   ├── teachable_machine_model.tflite  # Main AI model
+│   ├── labels.txt              # Model labels
+│   └── pose-model/             # Pose detection model
+├── utils/                      # Utilities
+│   ├── logger.py               # Logging system
+│   ├── config_loader.py        # Configuration loader
+│   ├── audio_player.py         # Audio playback
+│   └── sound_manager.py        # Sound management
+├── tools/                      # Development tools
+│   └── camera_viewer.py        # Camera testing tool
+└── logs/                       # System logs
 ```
 
 ### Frontend Code Structure
 
 ```
 frontend/
-├── app/                     # Page components
-│   ├── home/                # Home page (Patrol mode)
-│   ├── remote/              # Remote control page (Manual mode)
-│   └── safety/              # Safety monitoring page (Surveillance mode)
-├── components/              # UI components
-│   ├── ControlPanel.js      # Control panel
-│   ├── VideoFeed.js         # Video feed
-│   └── StatusDisplay.js     # Status display
-├── hooks/                   # Custom hooks
-│   └── useRobotConnection.js # Robot connection management
-└── public/                  # Static resources
+├── app/                        # Next.js app directory
+│   ├── page.tsx                # Main page
+│   ├── layout.tsx              # App layout
+│   ├── home/                   # Home page (Patrol mode)
+│   ├── remote/                 # Remote control page (Manual mode)
+│   ├── safety/                 # Safety monitoring page (Surveillance mode)
+│   ├── patrol/                 # Patrol mode interface
+│   ├── test/                   # Test pages
+│   ├── video-test/             # Video testing
+│   └── video-basic/            # Basic video display
+├── components/                 # React components
+│   ├── ui/                     # UI components (shadcn/ui)
+│   ├── navigation.tsx          # Navigation component
+│   ├── battery-indicator.tsx   # Battery status
+│   ├── emotion-display.tsx     # Emotion display
+│   ├── radar-display.tsx       # Radar visualization
+│   └── face-coordinates-table.tsx # Face detection display
+├── hooks/                      # Custom React hooks
+│   ├── useRobotConnection.js   # Robot connection management
+│   └── use-toast.ts            # Toast notifications
+├── lib/                        # Utilities
+│   └── utils.ts                # Helper functions
+└── public/                     # Static resources
+```
+
+### Additional Modules
+
+```
+robot_bio_monitor/              # Biometric monitoring
+├── __init__.py
+├── body_temperature_monitor.py # Temperature monitoring
+└── heartrate_monitor.py        # Heart rate monitoring
+
+robot_conversation/             # Voice interaction system
+├── voice_assistant.py          # Main voice assistant
+├── setup_ai.py                 # AI service configuration
+├── mood_commands.py            # Emotion analysis
+├── requirements.txt            # Python dependencies
+└── README.md                   # Voice system documentation
+
+robot_movement/                 # Movement control firmware
+├── __init__.py
+├── mobility_control.ino        # Basic mobility control
+└── mobility_control_R4.ino     # Arduino R4 mobility control
+
+sound/                          # Audio assets
+├── robot.wav                   # Basic robot sounds
+├── robot-bass.wav
+├── robot-compute.wav
+├── robot-happy1.wav
+├── robot-happy2.wav
+└── robot-happy3.wav
 ```
 
 ## Data Flow

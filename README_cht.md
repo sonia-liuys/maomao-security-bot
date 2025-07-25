@@ -28,6 +28,19 @@
    - 使用 AI 視覺識別特定人臉和學生證
    - 檢測到異常時發出警報
 
+### 附加功能
+
+4. **語音交互系統**：
+   - 中文語音識別和回應
+   - 多種 AI 服務支援 (OpenAI, Claude, Gemini, 本地 Ollama)
+   - 智能心情分析系統
+   - 實時情緒檢測和回應調整
+
+5. **生物監測**：
+   - 體溫監測
+   - 心率監測
+   - 健康狀態追蹤
+
 ## 系統架構
 
 整個系統分為前端和後端兩大部分：
@@ -53,44 +66,103 @@
 
 ## 程式碼架構
 
+項目組織為幾個主要模塊：
+
 ### 後端程式碼結構
 
 ```
 backend/
-├── main.py                  # 主程序，啟動整個系統
-├── config/                  # 配置文件
-│   └── settings.py          # 系統設置
-├── core/                    # 核心控制
-│   ├── robot_controller.py  # 機器人主控制器
-│   └── mode_manager.py      # 模式管理器
-├── vision/                  # 視覺系統
-│   ├── camera.py            # 攝像頭控制
-│   └── recognition.py       # AI 識別
-├── movement/                # 移動系統
-│   └── movement_controller.py # 移動控制器
-├── servo/                   # 伺服馬達控制
-│   └── servo_controller.py  # 伺服馬達控制器
-├── communication/           # 通訊系統
-│   └── websocket_server.py  # WebSocket 服務器
-└── safety/                  # 安全系統
-    └── watchdog.py          # 系統監控
+├── main.py                     # 主程序，啟動整個系統
+├── config.json                 # 系統配置
+├── core/                       # 核心控制
+│   └── robot_controller.py     # 機器人主控制器
+├── vision/                     # 視覺系統
+│   └── vision_system.py        # 視覺處理和 AI 識別
+├── movement/                   # 移動系統
+│   ├── movement_controller.py  # 移動控制器
+│   └── mobility_control/       # Arduino 移動控制
+│       └── mobility_control.ino
+├── servo/                      # 伺服馬達控制
+│   ├── servo_controller.py     # 伺服馬達控制器
+│   ├── arduino_controller.py   # Arduino 通訊
+│   └── arduino_led_controller/ # LED 控制韌體
+│       └── arduino_led_controller.ino
+├── communication/              # 通訊系統
+│   └── websocket_server.py     # WebSocket 服務器
+├── safety/                     # 安全系統
+│   └── watchdog.py             # 系統監控
+├── modes/                      # 操作模式
+│   └── mode_manager.py         # 模式管理
+├── models/                     # AI 模型
+│   ├── teachable_machine_model.tflite  # 主要 AI 模型
+│   ├── labels.txt              # 模型標籤
+│   └── pose-model/             # 姿態檢測模型
+├── utils/                      # 工具程式
+│   ├── logger.py               # 日誌系統
+│   ├── config_loader.py        # 配置載入器
+│   ├── audio_player.py         # 音頻播放
+│   └── sound_manager.py        # 聲音管理
+├── tools/                      # 開發工具
+│   └── camera_viewer.py        # 攝像頭測試工具
+└── logs/                       # 系統日誌
 ```
 
 ### 前端程式碼結構
 
 ```
 frontend/
-├── app/                     # 頁面組件
-│   ├── home/                # 主頁（巡邏模式）
-│   ├── remote/              # 遠程控制頁（手動模式）
-│   └── safety/              # 安全監控頁（監視模式）
-├── components/              # UI 組件
-│   ├── ControlPanel.js      # 控制面板
-│   ├── VideoFeed.js         # 視頻畫面
-│   └── StatusDisplay.js     # 狀態顯示
-├── hooks/                   # 自定義 hooks
-│   └── useRobotConnection.js # 機器人連接管理
-└── public/                  # 靜態資源
+├── app/                        # Next.js app 目錄
+│   ├── page.tsx                # 主頁面
+│   ├── layout.tsx              # 應用佈局
+│   ├── home/                   # 主頁（巡邏模式）
+│   ├── remote/                 # 遠程控制頁（手動模式）
+│   ├── safety/                 # 安全監控頁（監視模式）
+│   ├── patrol/                 # 巡邏模式界面
+│   ├── test/                   # 測試頁面
+│   ├── video-test/             # 視頻測試
+│   └── video-basic/            # 基本視頻顯示
+├── components/                 # React 組件
+│   ├── ui/                     # UI 組件 (shadcn/ui)
+│   ├── navigation.tsx          # 導航組件
+│   ├── battery-indicator.tsx   # 電池狀態
+│   ├── emotion-display.tsx     # 情緒顯示
+│   ├── radar-display.tsx       # 雷達可視化
+│   └── face-coordinates-table.tsx # 人臉檢測顯示
+├── hooks/                      # 自定義 React hooks
+│   ├── useRobotConnection.js   # 機器人連接管理
+│   └── use-toast.ts            # 吐司通知
+├── lib/                        # 工具程式
+│   └── utils.ts                # 輔助函數
+└── public/                     # 靜態資源
+```
+
+### 附加模塊
+
+```
+robot_bio_monitor/              # 生物監測
+├── __init__.py
+├── body_temperature_monitor.py # 體溫監測
+└── heartrate_monitor.py        # 心率監測
+
+robot_conversation/             # 語音交互系統
+├── voice_assistant.py          # 主要語音助手
+├── setup_ai.py                 # AI 服務配置
+├── mood_commands.py            # 情緒分析
+├── requirements.txt            # Python 依賴
+└── README.md                   # 語音系統文檔
+
+robot_movement/                 # 移動控制韌體
+├── __init__.py
+├── mobility_control.ino        # 基本移動控制
+└── mobility_control_R4.ino     # Arduino R4 移動控制
+
+sound/                          # 音頻資源
+├── robot.wav                   # 基本機器人聲音
+├── robot-bass.wav
+├── robot-compute.wav
+├── robot-happy1.wav
+├── robot-happy2.wav
+└── robot-happy3.wav
 ```
 
 ## 數據流程
